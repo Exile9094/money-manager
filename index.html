@@ -155,12 +155,19 @@
   .row:hover { background: var(--surface-2); }
   .row .avatar { width: 40px; height: 40px; border-radius: 11px; flex: none; display: grid; place-items: center; font-size: 18px; }
   .row .info { flex: 1; min-width: 0; }
-  .row .info .title { font-weight: 600; font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row .info .title { font-weight: 600; font-size: 14.5px; overflow-wrap: break-word; }
+  @media (min-width: 561px) { .row .info .title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } }
   .row .info .subtitle { font-size: 12.5px; color: var(--text-muted); display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
   .row .amt { font-weight: 700; font-size: 15px; white-space: nowrap; }
-  .row .del { opacity: 0; border: none; background: transparent; color: var(--text-soft); font-size: 15px; padding: 4px 6px; border-radius: 7px; }
-  .row:hover .del { opacity: 1; }
+  .row .del { border: none; background: transparent; color: var(--text-soft); font-size: 15px; padding: 4px 6px; border-radius: 7px; }
+  /* En mouse fino se oculta hasta el hover (menos ruido visual); en touch (sin hover real)
+     queda siempre visible, porque si no el botón nunca aparece con un solo tap. */
+  @media (hover: hover) and (pointer: fine) {
+    .row .del { opacity: 0; }
+    .row:hover .del { opacity: 1; }
+  }
   .row .del:hover { color: var(--neg); background: var(--neg-soft); }
+  .row .row-chev { color: var(--text-soft); font-size: 15px; flex: none; }
   .amt.pos { color: var(--pos); } .amt.neg { color: var(--neg); } .amt.tr { color: var(--transfer); }
 
   /* Cifras: monoespaciado tabular — vibra a libro contable / cinta de sumadora */
@@ -1062,7 +1069,7 @@ function movementRow(m, opts = {}) {
   const bg = m.type === 'income' ? 'var(--pos-soft)' : m.type === 'expense' ? 'var(--neg-soft)' : 'var(--transfer-soft)';
   const col = m.type === 'income' ? 'var(--pos)' : m.type === 'expense' ? 'var(--neg)' : 'var(--transfer)';
   return `
-    <div class="row">
+    <div class="row" data-mov="${m.id}" style="cursor:pointer" title="Tocá para ver el detalle">
       <div class="avatar" style="background:${bg};color:${col};font-weight:700">${icon}</div>
       <div class="info">
         <div class="title">${esc(title)}</div>
@@ -1070,9 +1077,53 @@ function movementRow(m, opts = {}) {
       </div>
       <div class="amt ${cls}">${sign}${fmtCur(m.amount, movCur(m)).replace('-', '')}</div>
       ${opts.rec ? `<button class="clip" data-rec-toggle="${m.id}" title="${m.reconciled ? 'Conciliado con el banco (tocá para desmarcar)' : 'Marcar como conciliado con el banco'}" style="${m.reconciled ? 'color:var(--pos)' : 'opacity:.3'}">✓</button>` : ''}
-      ${m.attachment ? `<button class="clip" data-photo="${m.id}" title="Ver comprobante">📎</button>` : ''}
-      <button class="del" data-del="${m.id}" title="Eliminar">✕</button>
+      ${m.attachment ? `<span class="clip" title="Tiene comprobante" style="pointer-events:none">📎</span>` : ''}
+      <span class="row-chev" aria-hidden="true">›</span>
     </div>`;
+}
+// Detalle de un movimiento (tocando la fila): toda la info + acciones de editar/eliminar,
+// para no tener que mostrar todo eso siempre en la lista (clave en mobile).
+function movementDetailModal(id) {
+  const m = state.movements.find(x => x.id === id);
+  if (!m) return;
+  const cat = category(m.categoryId);
+  let details;
+  if (m.type === 'transfer') {
+    const from = m.postings.find(p => p.amount < 0), to = m.postings.find(p => p.amount > 0);
+    details = `
+      <div class="field"><label>Desde</label><div>${esc(wallet(from.walletId)?.name || '—')} · <span class="badge unit">${esc(unit(from.unitId)?.name || '')}</span></div></div>
+      <div class="field"><label>Hacia</label><div>${esc(wallet(to.walletId)?.name || '—')} · <span class="badge unit">${esc(unit(to.unitId)?.name || '')}</span></div></div>`;
+  } else {
+    const p = m.postings[0];
+    details = `
+      <div class="field"><label>Categoría</label><div>${cat ? esc(catFullName(m.categoryId)) : '—'}</div></div>
+      <div class="field"><label>Billetera</label><div>${esc(wallet(p.walletId)?.name || '—')}</div></div>
+      <div class="field"><label>Unidad</label><div><span class="badge unit">${esc(unit(p.unitId)?.name || '')}</span></div></div>`;
+  }
+  const sourceLabel = { manual: 'Cargado a mano', recurrente: 'Generado por un recurrente', importado: 'Importado de un CSV' }[m.source] || m.source || 'Cargado a mano';
+  const cls = m.type === 'income' ? 'pos' : m.type === 'expense' ? 'neg' : 'tr';
+  const sign = m.type === 'income' ? '+' : m.type === 'expense' ? '−' : '';
+  openModal({
+    title: m.type === 'income' ? 'Ingreso' : m.type === 'expense' ? 'Gasto' : 'Transferencia',
+    body: `
+      <div style="text-align:center;margin-bottom:18px">
+        <div class="amt ${cls}" style="font-size:28px">${sign}${fmtCur(m.amount, movCur(m)).replace('-', '')}</div>
+        <div style="color:var(--text-muted);font-size:13px;margin-top:4px">${fmtDate(m.date)}</div>
+      </div>
+      ${details}
+      ${m.note ? `<div class="field"><label>Nota</label><div>${esc(m.note)}</div></div>` : ''}
+      <div class="field"><label>Origen</label><div>${esc(sourceLabel)}${m.reconciled ? ' · ✓ conciliado' : ''}</div></div>
+      ${m.attachment ? `<button class="btn ghost sm" id="viewAttachM" style="margin-bottom:14px">📎 Ver comprobante</button>` : ''}
+      <div class="modal-actions">
+        <button class="btn ghost" id="editMovBtn">✎ Editar</button>
+        <button class="btn danger" id="delMovBtn">Eliminar</button>
+      </div>`,
+    onOpen: () => {
+      if (m.attachment) $('#viewAttachM').onclick = () => photoView(m.attachment);
+      $('#editMovBtn').onclick = () => movementModal(null, m.id);
+      $('#delMovBtn').onclick = () => delMovement(m.id) && closeModal();
+    }
+  });
 }
 
 // ---------- Vista: Calendario ----------
@@ -1127,10 +1178,7 @@ function dayModal(dateISO) {
     title: new Date(dateISO + 'T00:00:00').toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' }),
     body: `<div class="list" style="margin:-6px -6px 12px">${rows}</div>
       <div class="modal-actions"><button class="btn" id="addDay">＋ Agregar en este día</button></div>`,
-    onOpen: () => {
-      $('#addDay').onclick = () => { closeModal(); movementModal(dateISO); };
-      overlay.querySelectorAll('[data-del]').forEach(b => b.onclick = () => { delMovement(b.dataset.del); closeModal(); });
-    }
+    onOpen: () => { $('#addDay').onclick = () => { closeModal(); movementModal(dateISO); }; }
   });
 }
 
@@ -1461,42 +1509,68 @@ function unitTransfersAllTime(unitId) {
   return { out, inn };
 }
 // Tarjeta de resultado de UNA unidad (su propio P&L, sin sumar sub-negocios).
+// Compacta a propósito (clave en mobile): nombre + saldo + resultado. El resto del detalle
+// (bars, transfers acumulados, histórico, facturación) vive en unitDetailModal, al tocar.
 // isMember=true → estilo compacto para ir anidada dentro del bloque de su marca.
 function unitCard(u, list, isMember = false) {
-  const { inc, exp } = unitPnL(u.id, list);
-  const res = inc - exp, mx = Math.max(inc, exp, 1);
-  const { out, inn } = unitTransfersAllTime(u.id);
-  const all = unitPnL(u.id, state.movements); // macro histórico: todo lo que entró y salió desde el inicio
+  const { inc, exp } = unitPnL(u.id, list), res = inc - exp;
   const bal = unitBalance(u.id), biz = u.kind === 'business';
   const wrap = isMember
-    ? 'style="padding:14px;margin-bottom:10px;background:var(--surface-2);border-radius:12px"'
-    : 'class="card" style="padding:18px;margin-bottom:14px"';
-  return `<div ${wrap}>
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+    ? 'style="padding:14px;margin-bottom:10px;background:var(--surface-2);border-radius:12px;cursor:pointer"'
+    : 'class="card" style="padding:16px;margin-bottom:14px;cursor:pointer"';
+  return `<div ${wrap} data-unit-card="${u.id}" title="Tocá para ver el detalle">
+      <div style="display:flex;align-items:center;gap:10px">
         <span style="width:12px;height:12px;border-radius:50%;background:${unitColor(u)};flex:none"></span>
         <b style="font-size:${isMember ? 14.5 : 16}px">${esc(u.name)}</b><span class="badge">${isMember ? 'Sub-negocio' : (biz ? 'Negocio' : 'Personal')}</span>
         <div style="flex:1"></div>
-        <div style="text-align:right"><div style="font-size:11px;color:var(--text-soft)">Saldo actual</div>
+        <div style="text-align:right"><div style="font-size:11px;color:var(--text-soft)">Saldo</div>
           <div style="font-weight:800;font-size:${isMember ? 16 : 18}px;color:${bal < 0 ? 'var(--neg)' : 'inherit'}">${fmt(bal)}</div></div>
+        <span class="row-chev" aria-hidden="true">›</span>
       </div>
-      <div class="io-bars" style="padding:0;gap:10px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:10px;font-size:13px">
+        <span style="color:var(--text-muted)">Resultado del período</span>
+        <span style="font-weight:700;color:${res >= 0 ? 'var(--pos)' : 'var(--neg)'}">${fmt(res)}</span>
+      </div>
+    </div>`;
+}
+// Detalle completo de una unidad (tocando su tarjeta): bars ingreso/gasto, transferencias
+// acumuladas, histórico total, facturación 12m (negocio) y sus movimientos recientes.
+function unitDetailModal(id) {
+  const u = unit(id); if (!u) return;
+  const list = periodMovements();
+  const { inc, exp } = unitPnL(u.id, list), res = inc - exp, mx = Math.max(inc, exp, 1);
+  const { out, inn } = unitTransfersAllTime(u.id);
+  const all = unitPnL(u.id, state.movements);
+  const bal = unitBalance(u.id), biz = u.kind === 'business';
+  const recent = state.movements.filter(m => m.postings.some(p => p.unitId === u.id))
+    .sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id)).slice(0, 8);
+  openModal({
+    title: u.name,
+    body: `
+      <div style="text-align:center;margin-bottom:16px">
+        <div style="font-size:12px;color:var(--text-soft)">Saldo actual</div>
+        <div style="font-size:28px;font-weight:800;color:${bal < 0 ? 'var(--neg)' : 'inherit'}">${fmt(bal)}</div>
+      </div>
+      <div class="io-bars" style="padding:0;gap:10px;margin-bottom:14px">
         <div class="io-item"><div class="io-top"><span style="color:var(--pos)">Ingresos del período</span><span>${fmt(inc)}</span></div>
           <div class="io-track"><div class="io-fill" style="width:${inc / mx * 100}%;background:var(--pos)"></div></div></div>
         <div class="io-item"><div class="io-top"><span style="color:var(--neg)">Gastos del período</span><span>${fmt(exp)}</span></div>
           <div class="io-track"><div class="io-fill" style="width:${exp / mx * 100}%;background:var(--neg)"></div></div></div>
       </div>
-      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;padding-top:12px;border-top:1px solid var(--border);margin-bottom:12px">
         <span style="font-weight:600">Resultado del período</span>
-        <span style="font-weight:800;font-size:${isMember ? 16 : 18}px;color:${res >= 0 ? 'var(--pos)' : 'var(--neg)'}">${fmt(res)}</span></div>
-      <div style="display:flex;gap:16px;margin-top:12px;flex-wrap:wrap;font-size:12.5px;color:var(--text-muted)">
+        <span style="font-weight:800;font-size:18px;color:${res >= 0 ? 'var(--pos)' : 'var(--neg)'}">${fmt(res)}</span></div>
+      <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:12.5px;color:var(--text-muted);margin-bottom:10px">
         <span>${biz ? 'Retiros de ganancias' : 'Salidas a otras unidades'} (acum.) <b style="color:var(--text)">${fmt(out)}</b></span>
         <span>${biz ? 'Aportes de capital' : 'Entradas de otras unidades'} (acum.) <b style="color:var(--text)">${fmt(inn)}</b></span>
       </div>
-      <div style="margin-top:8px;font-size:12.5px;color:var(--text-muted)">
+      <div style="font-size:12.5px;color:var(--text-muted);margin-bottom:${biz ? 4 : 16}px">
         Histórico total: entró <b style="color:var(--pos)">${fmt(all.inc)}</b> · salió <b style="color:var(--neg)">${fmt(all.exp)}</b> · resultado <b style="color:${all.inc - all.exp >= 0 ? 'var(--pos)' : 'var(--neg)'}">${fmt(all.inc - all.exp)}</b>
       </div>
-      ${biz ? `<div style="margin-top:6px;font-size:12.5px;color:var(--text-muted)" title="Suma de ingresos de los últimos 12 meses móviles, el número que mira el monotributo">Facturación últimos 12 meses: <b style="color:var(--text)">${fmt(unitIncome12m(u.id))}</b></div>` : ''}
-    </div>`;
+      ${biz ? `<div style="font-size:12.5px;color:var(--text-muted);margin-bottom:16px" title="Suma de ingresos de los últimos 12 meses móviles, el número que mira el monotributo">Facturación últimos 12 meses: <b style="color:var(--text)">${fmt(unitIncome12m(u.id))}</b></div>` : ''}
+      <h2 class="section" style="margin-top:0">Movimientos recientes</h2>
+      <div class="list" style="margin:-6px -6px 0">${recent.map(m => movementRow(m)).join('') || emptyBox('—', 'Sin movimientos')}</div>`
+  });
 }
 // Ingresos brutos de una unidad en los últimos 12 meses móviles (referencia p/ monotributo).
 function unitIncome12m(unitId) {
@@ -1505,29 +1579,58 @@ function unitIncome12m(unitId) {
   for (const m of state.movements) if (m.type === 'income' && m.date >= from && m.postings[0]?.unitId === unitId) s += movARS(m);
   return s;
 }
-// Bloque de una marca: encabezado consolidado (marca + sub-negocios) y las tarjetas adentro.
+// Bloque de una marca: encabezado consolidado (marca + sub-negocios, compacto y tappable
+// para el detalle vía unitGroupDetailModal) y las tarjetas de cada sub-negocio adentro.
 function brandBlock(u, list) {
   const kids = unitChildren(u.id);
   const { inc, exp } = unitGroupPnL(u.id, list), res = inc - exp;
-  const allG = unitGroupPnL(u.id, state.movements);
   const gbal = unitGroupBalance(u.id);
   return `<div class="card" style="padding:16px;margin-bottom:14px;border:1.5px solid var(--brand)">
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;cursor:pointer" data-brand-card="${u.id}" title="Tocá para ver el detalle consolidado">
         <span style="width:12px;height:12px;border-radius:50%;background:${unitColor(u)};flex:none"></span>
         <b style="font-size:17px">${esc(u.name)}</b>
         <span class="badge">Marca · ${kids.length} sub-negocio${kids.length > 1 ? 's' : ''}</span>
         <div style="flex:1"></div>
         <div style="text-align:right"><div style="font-size:11px;color:var(--text-soft)">Saldo consolidado</div>
           <div style="font-weight:800;font-size:18px;color:${gbal < 0 ? 'var(--neg)' : 'inherit'}">${fmt(gbal)}</div></div>
+        <span class="row-chev" aria-hidden="true">›</span>
       </div>
-      <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:13px;margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--border)">
-        <span style="color:var(--pos)">Ingresos <b>${fmt(inc)}</b></span>
-        <span style="color:var(--neg)">Gastos <b>${fmt(exp)}</b></span>
-        <span>Resultado consolidado <b style="color:${res >= 0 ? 'var(--pos)' : 'var(--neg)'}">${fmt(res)}</b></span>
-        <span style="color:var(--text-muted)">Histórico del grupo: entró <b style="color:var(--pos)">${fmt(allG.inc)}</b> · salió <b style="color:var(--neg)">${fmt(allG.exp)}</b></span>
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:10px;padding-bottom:12px;margin-bottom:12px;border-bottom:1px solid var(--border);font-size:13px">
+        <span style="color:var(--text-muted)">Resultado consolidado del período</span>
+        <span style="font-weight:700;color:${res >= 0 ? 'var(--pos)' : 'var(--neg)'}">${fmt(res)}</span>
       </div>
       ${[u, ...kids].map(m => unitCard(m, list, true)).join('')}
     </div>`;
+}
+// Detalle consolidado de una marca (grupo = marca + sub-negocios), tocando su encabezado.
+function unitGroupDetailModal(id) {
+  const u = unit(id); if (!u) return;
+  const list = periodMovements();
+  const kids = unitChildren(u.id);
+  const { inc, exp } = unitGroupPnL(u.id, list), res = inc - exp, mx = Math.max(inc, exp, 1);
+  const allG = unitGroupPnL(u.id, state.movements);
+  const gbal = unitGroupBalance(u.id);
+  openModal({
+    title: `${u.name} (grupo)`,
+    body: `
+      <div style="text-align:center;margin-bottom:16px">
+        <div style="font-size:12px;color:var(--text-soft)">Saldo consolidado</div>
+        <div style="font-size:28px;font-weight:800;color:${gbal < 0 ? 'var(--neg)' : 'inherit'}">${fmt(gbal)}</div>
+        <div style="font-size:12.5px;color:var(--text-muted);margin-top:4px">Incluye ${kids.length} sub-negocio${kids.length > 1 ? 's' : ''}: ${kids.map(k => esc(k.name)).join(', ')}</div>
+      </div>
+      <div class="io-bars" style="padding:0;gap:10px;margin-bottom:14px">
+        <div class="io-item"><div class="io-top"><span style="color:var(--pos)">Ingresos del período</span><span>${fmt(inc)}</span></div>
+          <div class="io-track"><div class="io-fill" style="width:${inc / mx * 100}%;background:var(--pos)"></div></div></div>
+        <div class="io-item"><div class="io-top"><span style="color:var(--neg)">Gastos del período</span><span>${fmt(exp)}</span></div>
+          <div class="io-track"><div class="io-fill" style="width:${exp / mx * 100}%;background:var(--neg)"></div></div></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:baseline;padding-top:12px;border-top:1px solid var(--border);margin-bottom:12px">
+        <span style="font-weight:600">Resultado consolidado</span>
+        <span style="font-weight:800;font-size:18px;color:${res >= 0 ? 'var(--pos)' : 'var(--neg)'}">${fmt(res)}</span></div>
+      <div style="font-size:12.5px;color:var(--text-muted)">
+        Histórico del grupo: entró <b style="color:var(--pos)">${fmt(allG.inc)}</b> · salió <b style="color:var(--neg)">${fmt(allG.exp)}</b> · resultado <b style="color:${allG.inc - allG.exp >= 0 ? 'var(--pos)' : 'var(--neg)'}">${fmt(allG.inc - allG.exp)}</b>
+      </div>`
+  });
 }
 function renderBusiness() {
   const list = periodMovements();
@@ -2339,23 +2442,31 @@ function photoView(src) { if (!src) return; openModal({ title: 'Comprobante', bo
 function photoModal(id) { photoView(state.movements.find(x => x.id === id)?.attachment); }
 
 // ---------- Modal: Nuevo movimiento ----------
-let mType = 'expense', mPreset = null;
-function movementModal(presetDate) {
-  mType = 'expense'; mPreset = presetDate || null; amt = ''; mAttach = null;
+let mType = 'expense', mPreset = null, mEditId = null;
+// editId: editar un movimiento existente en vez de crear uno nuevo (se abre desde movementDetailModal).
+// No se puede cambiar el tipo de un movimiento en edición (por eso se oculta el selector) — para
+// eso conviene borrar y volver a cargar.
+function movementModal(presetDate, editId) {
+  mEditId = editId || null;
+  const editing = mEditId ? state.movements.find(x => x.id === mEditId) : null;
+  mType = editing ? editing.type : 'expense'; mPreset = editing ? editing.date : (presetDate || null);
+  amt = editing ? String(editing.amount) : ''; mAttach = editing ? (editing.attachment || null) : null;
   openModal({
-    title: 'Nuevo movimiento',
-    body: `<div class="seg" id="seg">
+    title: editing ? 'Editar movimiento' : 'Nuevo movimiento',
+    body: editing ? `<div id="mForm"></div>` : `<div class="seg" id="seg">
         <button data-t="expense" class="active">Gasto</button>
         <button data-t="income">Ingreso</button>
         <button data-t="transfer">Transferir</button>
         <button data-t="adjust">Ajuste</button>
       </div><div id="mForm"></div>`,
     onOpen: () => {
-      document.querySelectorAll('#seg button').forEach(b => b.onclick = () => {
-        mType = b.dataset.t; amt = ''; mAttach = null;
-        document.querySelectorAll('#seg button').forEach(x => x.classList.toggle('active', x === b));
-        renderMForm();
-      });
+      if (!editing) {
+        document.querySelectorAll('#seg button').forEach(b => b.onclick = () => {
+          mType = b.dataset.t; amt = ''; mAttach = null;
+          document.querySelectorAll('#seg button').forEach(x => x.classList.toggle('active', x === b));
+          renderMForm();
+        });
+      }
       renderMForm();
     }
   });
@@ -2383,22 +2494,24 @@ function catOptions(kind, sel) {
 
 function renderMForm() {
   const c = $('#mForm');
-  const w0 = state.wallets[0]?.id, u0 = lensUnit() ? lens : state.units[0]?.id; // bajo lente, esa cuenta es la unidad por defecto
+  const editing = mEditId ? state.movements.find(x => x.id === mEditId) : null;
+  const w0 = editing ? editing.postings[0]?.walletId : state.wallets[0]?.id;
+  const u0 = editing ? editing.postings[0]?.unitId : (lensUnit() ? lens : state.units[0]?.id); // bajo lente, esa cuenta es la unidad por defecto
   const date = mPreset || todayISO();
   const dateField = `<div class="field"><label>Fecha</label><input id="date" type="date" value="${date}"></div>`;
-  const noteField = `<div class="field"><label>Nota (opcional)</label><input id="note" type="text" placeholder="Descripción..."></div>`;
+  const noteField = `<div class="field"><label>Nota (opcional)</label><input id="note" type="text" placeholder="Descripción..." value="${esc(editing?.note || '')}"></div>`;
 
   if (mType === 'expense' || mType === 'income') {
     c.innerHTML = `${keypadHTML()}
-      <div class="field"><label>Categoría</label><select id="cat">${catOptions(mType)}</select></div>
+      <div class="field"><label>Categoría</label><select id="cat">${catOptions(mType, editing?.categoryId)}</select></div>
       <div class="two">
         <div class="field"><label>Billetera</label><select id="wallet">${walletOptions(w0)}</select></div>
         <div class="field"><label>Unidad</label><select id="unit">${unitOptions(u0)}</select></div>
       </div>${dateField}${noteField}
-      ${mType === 'income' ? `<div class="field"><label>Comisión % (opcional — ej: si cobrás por MP)</label><input id="feePct" type="number" step="0.1" min="0" placeholder="0"><div class="hint" style="margin-top:4px">Se descuenta al guardar: queda registrado el neto que recibís de verdad.</div></div>` : ''}
+      ${mType === 'income' && !editing ? `<div class="field"><label>Comisión % (opcional — ej: si cobrás por MP)</label><input id="feePct" type="number" step="0.1" min="0" placeholder="0"><div class="hint" style="margin-top:4px">Se descuenta al guardar: queda registrado el neto que recibís de verdad.</div></div>` : ''}
       <div id="attachSlot"></div>
-      <div class="modal-actions"><button class="btn" id="saveM">Guardar ${mType === 'income' ? 'ingreso' : 'gasto'}</button></div>`;
-    wireKeypad(); renderAttach(); $('#wallet').onchange = updKp; $('#saveM').onclick = () => saveSimple(mType);
+      <div class="modal-actions"><button class="btn" id="saveM">${editing ? 'Guardar cambios' : 'Guardar ' + (mType === 'income' ? 'ingreso' : 'gasto')}</button></div>`;
+    wireKeypad(); renderAttach(); updKp(); $('#wallet').onchange = updKp; $('#saveM').onclick = () => saveSimple(mType);
     // Reglas de categorización: si la nota contiene el texto de una regla, la categoría se elige sola.
     $('#note').oninput = () => {
       const v = $('#note').value.toLowerCase(); if (!v) return;
@@ -2406,23 +2519,25 @@ function renderMForm() {
       if (rule && $('#cat').value !== rule.categoryId) { $('#cat').value = rule.categoryId; toast(`Categoría: ${catFullName(rule.categoryId)} (regla «${rule.match}»)`); }
     };
   } else if (mType === 'transfer') {
+    const from = editing?.postings.find(p => p.amount < 0), to = editing?.postings.find(p => p.amount > 0);
     c.innerHTML = `${keypadHTML()}
       <div class="transfer-box"><div class="tag">Desde</div>
-        <div class="two"><div class="field" style="margin:0"><label>Billetera</label><select id="fromWallet">${walletOptions(w0)}</select></div>
-          <div class="field" style="margin:0"><label>Unidad</label><select id="fromUnit">${unitOptions(u0)}</select></div></div></div>
+        <div class="two"><div class="field" style="margin:0"><label>Billetera</label><select id="fromWallet">${walletOptions(from?.walletId || w0)}</select></div>
+          <div class="field" style="margin:0"><label>Unidad</label><select id="fromUnit">${unitOptions(from?.unitId || u0)}</select></div></div></div>
       <div class="transfer-arrow">↓</div>
       <div class="transfer-box"><div class="tag">Hacia</div>
-        <div class="two"><div class="field" style="margin:0"><label>Billetera</label><select id="toWallet">${walletOptions(w0)}</select></div>
-          <div class="field" style="margin:0"><label>Unidad</label><select id="toUnit">${unitOptions(u0)}</select></div></div></div>
+        <div class="two"><div class="field" style="margin:0"><label>Billetera</label><select id="toWallet">${walletOptions(to?.walletId || w0)}</select></div>
+          <div class="field" style="margin:0"><label>Unidad</label><select id="toUnit">${unitOptions(to?.unitId || u0)}</select></div></div></div>
       <div class="field" id="toAmtBox" style="display:none;margin-top:12px"><label id="toAmtLabel">Monto recibido</label><input id="toAmt" type="number" step="0.01" placeholder="0"></div>
       <div class="hint">Cambiá la <b>billetera</b> para mover plata de un lado a otro (ej: Mercado Pago → Efectivo). Cambiá la <b>unidad</b> para pasar fondos entre lo personal y un negocio (retiro de ganancias o aporte de capital). Si las billeteras tienen <b>distinta moneda</b> (ej: comprar dólares), indicá cuánto entra.</div>
       ${dateField}${noteField}
       <div id="attachSlot"></div>
-      <div class="modal-actions"><button class="btn" id="saveM">Guardar transferencia</button></div>`;
+      <div class="modal-actions"><button class="btn" id="saveM">${editing ? 'Guardar cambios' : 'Guardar transferencia'}</button></div>`;
     wireKeypad(); renderAttach();
     $('#fromWallet').onchange = () => { const ta = $('#toAmt'); if (ta) ta.dataset.touched = ''; syncTransferCur(); };
     $('#toWallet').onchange = () => { const ta = $('#toAmt'); if (ta) ta.dataset.touched = ''; syncTransferCur(); };
     $('#toAmt').oninput = () => { $('#toAmt').dataset.touched = '1'; };
+    if (to) { $('#toAmt').value = to.amount; $('#toAmt').dataset.touched = '1'; }
     syncTransferCur();
     $('#saveM').onclick = saveTransfer;
   } else {
@@ -2444,6 +2559,12 @@ function saveSimple(type) {
   // Ingreso con comisión (ej: cobro por MP): se registra el neto que llega de verdad.
   const fee = $('#feePct') ? Math.max(0, parseFloat($('#feePct').value) || 0) : 0;
   if (type === 'income' && fee > 0) { amount = r2(amount * (1 - fee / 100)); note = (note ? note + ' · ' : '') + `neto de ${fee}% com.`; }
+  if (mEditId) {
+    const m = state.movements.find(x => x.id === mEditId);
+    m.type = type; m.amount = amount; m.date = $('#date').value; m.categoryId = $('#cat').value; m.note = note; m.attachment = mAttach || null;
+    m.postings = [{ walletId: $('#wallet').value, unitId: $('#unit').value, amount: type === 'income' ? amount : -amount }];
+    mEditId = null; save(); closeModal(); render(); return toast('Movimiento actualizado');
+  }
   const m = { id: uid(), type, amount, date: $('#date').value, categoryId: $('#cat').value, note, source: 'manual', attachment: mAttach || null,
     postings: [{ walletId: $('#wallet').value, unitId: $('#unit').value, amount: type === 'income' ? amount : -amount }] };
   state.movements.push(m);
@@ -2477,6 +2598,12 @@ function saveTransfer() {
   const fc = walletCur(fw), tc = walletCur(tw);
   let toAmount = amount;
   if (fc !== tc) { toAmount = parseFloat($('#toAmt').value); if (!toAmount || toAmount <= 0) return toast('Ingresá el monto recibido'); }
+  if (mEditId) {
+    const m = state.movements.find(x => x.id === mEditId);
+    m.amount = amount; m.date = $('#date').value; m.note = $('#note').value.trim(); m.attachment = mAttach || null;
+    m.postings = [{ walletId: fw, unitId: fu, amount: -amount }, { walletId: tw, unitId: tu, amount: toAmount }];
+    mEditId = null; save(); closeModal(); render(); return toast('Transferencia actualizada');
+  }
   const m = { id: uid(), type: 'transfer', amount, date: $('#date').value, categoryId: null, note: $('#note').value.trim(), source: 'manual', attachment: mAttach || null,
     postings: [{ walletId: fw, unitId: fu, amount: -amount }, { walletId: tw, unitId: tu, amount: toAmount }] };
   state.movements.push(m); save(); closeModal(); render(); toast('Transferencia registrada');
@@ -2803,7 +2930,7 @@ function delCat(id) {
   state.categories = state.categories.filter(c => c.id !== id);
   state.budgets = state.budgets.filter(b => b.categoryId !== id); save(); render();
 }
-function delMovement(id) { if (!confirm('¿Eliminar este movimiento?')) return; state.movements = state.movements.filter(m => m.id !== id); save(); render(); }
+function delMovement(id) { if (!confirm('¿Eliminar este movimiento?')) return false; state.movements = state.movements.filter(m => m.id !== id); save(); render(); return true; }
 
 // ---------- Datos ----------
 function exportData() {
@@ -2872,8 +2999,12 @@ document.addEventListener('click', e => {
     if (m) { m.reconciled = !m.reconciled; save(); render(); }
     return;
   }
-  const del = e.target.closest('[data-del]');
-  if (del && !overlay.classList.contains('open')) delMovement(del.dataset.del);
+  const mov = e.target.closest('[data-mov]');
+  if (mov) { movementDetailModal(mov.dataset.mov); return; }
+  const brandCard = e.target.closest('[data-brand-card]');
+  if (brandCard) { unitGroupDetailModal(brandCard.dataset.brandCard); return; }
+  const unitCardEl = e.target.closest('[data-unit-card]');
+  if (unitCardEl) { unitDetailModal(unitCardEl.dataset.unitCard); return; }
   if (!e.target.closest('.nav-menu') && !e.target.closest('#navMore')) closeNavMenu();
 });
 let navResizeT = null;
