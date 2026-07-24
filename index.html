@@ -461,7 +461,7 @@ function save() {
 // ---------- Nube (Supabase) — Fase 4a: respaldo y sync del estado completo ----------
 // El estado entero se guarda como una fila jsonb en public.app_state (RLS por usuario).
 // La anon key se pega una vez en Config y vive en localStorage['gf-supa'] (nunca en el código ni en el export).
-const SUPA_URL = 'https://zewwilqpllwogxrywqrn.supabase.co';
+const SUPA_URL = 'https://lpdwtnzqtfjulsfmrnso.supabase.co';
 let supa = (() => { try { return JSON.parse(localStorage.getItem('gf-supa')) || null; } catch { return null; } })();
 function saveSupa() { if (supa) localStorage.setItem('gf-supa', JSON.stringify(supa)); else localStorage.removeItem('gf-supa'); }
 let cloudStatus = supa?.refresh_token ? 'idle' : 'off'; // off | idle | sync | ok | error
@@ -530,11 +530,28 @@ async function cloudPull() { // → {data, updated_at} | null (sin fila) | undef
     return rows.length ? rows[0] : null;
   } catch { return undefined; }
 }
+// Incorpora movimientos que están en la nube y no acá (los que carga el bot de Telegram).
+// Solo agrega: nunca borra nada local, así un push viejo no puede hacer desaparecer datos.
+function mergeRemoteMovements(remote) {
+  if (!remote || !Array.isArray(remote.movements)) return 0;
+  const tengo = new Set(state.movements.map(m => m.id));
+  const nuevos = remote.movements.filter(m => m && m.id && !tengo.has(m.id));
+  if (!nuevos.length) return 0;
+  state.movements.push(...nuevos);
+  try { localStorage.setItem(KEY, JSON.stringify(state)); } catch {}
+  return nuevos.length;
+}
 async function cloudPush() {
   if (!cloudReady()) return false;
   setCloudStatus('sync');
   try {
     const uid = supa.user_id || jwtSub(supa.access_token);
+    // Si la nube cambió después de nuestra última sync (ej. el bot cargó un gasto),
+    // hay que traerlo antes de subir: si no, este push lo pisaría.
+    const row = await cloudPull();
+    if (row && (!supa.lastSync || new Date(row.updated_at).getTime() > new Date(supa.lastSync).getTime())) {
+      if (mergeRemoteMovements(row.data)) render();
+    }
     const res = await supaFetch('/rest/v1/app_state?on_conflict=user_id', {
       method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
       body: JSON.stringify({ user_id: uid, data: state, updated_at: new Date().toISOString() }) });
@@ -545,6 +562,40 @@ async function cloudPush() {
 }
 let pushTimer = null;
 function scheduleCloudPush() { if (!cloudReady()) return; clearTimeout(pushTimer); pushTimer = setTimeout(cloudPush, 1500); }
+// Cuánto "contenido" tiene un estado — sirve para no reemplazar a ciegas datos cargados a mano.
+function stateSize(s) {
+  if (!s) return 0;
+  return ['movements', 'debts', 'payplans', 'goals', 'recurring', 'budgets']
+    .reduce((n, k) => n + (Array.isArray(s[k]) ? s[k].length : 0), 0);
+}
+function stateResumen(s) {
+  const n = k => (Array.isArray(s?.[k]) ? s[k].length : 0);
+  return [[n('movements'), 'movimiento'], [n('debts'), 'deuda'], [n('recurring'), 'recurrente'],
+    [n('payplans'), 'plan de pago'], [n('goals'), 'meta']]
+    .filter(([c]) => c > 0)
+    .map(([c, l]) => `${c} ${l}${c > 1 ? (l.endsWith('l') ? 'es' : 's') : ''}`).join(' · ') || 'sin datos';
+}
+// Primer login en un dispositivo que YA tiene datos cargados: la fecha no alcanza para
+// decidir (la nube puede ser más nueva pero tener menos). Que elija el usuario.
+function syncChoiceModal(row) {
+  const local = stateResumen(state), nube = stateResumen(row.data);
+  openModal({ title: '¿Con cuáles nos quedamos?',
+    body: `<div class="hint" style="margin-top:0">Este dispositivo y la nube tienen datos distintos. Elegí cuáles conservar — <b>lo otro se reemplaza</b>.</div>
+      <div class="field"><label>📱 En este dispositivo</label><div>${esc(local)}</div></div>
+      <div class="field"><label>☁️ En la nube (última vez: ${esc(fmtDate(row.updated_at.slice(0, 10)))})</label><div>${esc(nube)}</div></div>
+      <div class="hint">Igual se guarda una copia de rescate de lo que haya en este dispositivo.</div>
+      <div class="modal-actions"><button class="btn ghost" id="syncDown">Usar los de la nube</button><button class="btn" id="syncUp">Usar los de este dispositivo</button></div>`,
+    onOpen: () => {
+      $('#syncUp').onclick = async () => { closeModal(); await cloudPush(); toast('Se subieron los datos de este dispositivo'); };
+      $('#syncDown').onclick = () => {
+        try { localStorage.setItem('gf-backup', JSON.stringify({ at: new Date().toISOString(), state })); } catch {}
+        state = row.data; migrate();
+        try { localStorage.setItem(KEY, JSON.stringify(state)); } catch {}
+        supa.lastSync = new Date().toISOString(); saveSupa(); setCloudStatus('ok');
+        closeModal(); render(); toast('Se bajaron los datos de la nube');
+      };
+    } });
+}
 // Al iniciar: si la nube tiene una versión más nueva que la última sync de este dispositivo, se baja; si no, se sube lo local.
 async function cloudInit() {
   if (!cloudReady()) return;
@@ -552,7 +603,15 @@ async function cloudInit() {
   setCloudStatus('sync');
   const row = await cloudPull();
   if (row === undefined) { setCloudStatus('error', 'No se pudo consultar la nube'); return; }
+  // Primera sync en este dispositivo y hay datos de los dos lados → preguntar antes de pisar nada.
+  if (row && !supa.lastSync && stateSize(state) > 0 && stateSize(row.data) > 0) {
+    setCloudStatus('idle');
+    return syncChoiceModal(row);
+  }
   if (row && (!supa.lastSync || new Date(row.updated_at).getTime() > new Date(supa.lastSync).getTime())) {
+    // Copia de rescate antes de reemplazar lo local: si algo se cargó offline en este
+    // dispositivo y la nube venía más nueva, no se pierde en silencio.
+    try { localStorage.setItem('gf-backup', JSON.stringify({ at: new Date().toISOString(), state })); } catch {}
     state = row.data; migrate();
     try { localStorage.setItem(KEY, JSON.stringify(state)); } catch {}
     supa.lastSync = new Date().toISOString(); saveSupa(); setCloudStatus('ok');
@@ -561,6 +620,18 @@ async function cloudInit() {
     await cloudPush();
   }
 }
+// Al volver a la app (cambiar de pestaña, desbloquear el celular) se traen los
+// movimientos que hayan entrado por Telegram mientras tanto.
+async function cloudRefresh() {
+  if (!cloudReady() || document.hidden) return;
+  const row = await cloudPull();
+  if (!row) return;
+  if (supa.lastSync && new Date(row.updated_at).getTime() <= new Date(supa.lastSync).getTime()) return;
+  const n = mergeRemoteMovements(row.data);
+  supa.lastSync = new Date().toISOString(); saveSupa();
+  if (n) { render(); toast(`${n} movimiento${n > 1 ? 's' : ''} nuevo${n > 1 ? 's' : ''} desde Telegram`); }
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) cloudRefresh(); });
 
 // ---------- Búsquedas ----------
 const wallet = id => state.wallets.find(w => w.id === id);
@@ -1077,7 +1148,7 @@ function movementRow(m, opts = {}) {
       </div>
       <div class="amt ${cls}">${sign}${fmtCur(m.amount, movCur(m)).replace('-', '')}</div>
       ${opts.rec ? `<button class="clip" data-rec-toggle="${m.id}" title="${m.reconciled ? 'Conciliado con el banco (tocá para desmarcar)' : 'Marcar como conciliado con el banco'}" style="${m.reconciled ? 'color:var(--pos)' : 'opacity:.3'}">✓</button>` : ''}
-      ${m.attachment ? `<span class="clip" title="Tiene comprobante" style="pointer-events:none">📎</span>` : ''}
+      ${m.attachment || m.attachmentPath ? `<span class="clip" title="Tiene comprobante" style="pointer-events:none">📎</span>` : ''}
       <span class="row-chev" aria-hidden="true">›</span>
     </div>`;
 }
@@ -1113,13 +1184,13 @@ function movementDetailModal(id) {
       ${details}
       ${m.note ? `<div class="field"><label>Nota</label><div>${esc(m.note)}</div></div>` : ''}
       <div class="field"><label>Origen</label><div>${esc(sourceLabel)}${m.reconciled ? ' · ✓ conciliado' : ''}</div></div>
-      ${m.attachment ? `<button class="btn ghost sm" id="viewAttachM" style="margin-bottom:14px">📎 Ver comprobante</button>` : ''}
+      ${m.attachment || m.attachmentPath ? `<button class="btn ghost sm" id="viewAttachM" style="margin-bottom:14px">📎 Ver comprobante</button>` : ''}
       <div class="modal-actions">
         <button class="btn ghost" id="editMovBtn">✎ Editar</button>
         <button class="btn danger" id="delMovBtn">Eliminar</button>
       </div>`,
     onOpen: () => {
-      if (m.attachment) $('#viewAttachM').onclick = () => photoView(m.attachment);
+      if (m.attachment || m.attachmentPath) $('#viewAttachM').onclick = () => photoModal(m.id);
       $('#editMovBtn').onclick = () => movementModal(null, m.id);
       $('#delMovBtn').onclick = () => delMovement(m.id) && closeModal();
     }
@@ -2164,9 +2235,9 @@ function renderConfig() {
     <div class="card" style="padding:16px">
       <div id="cloudStatus" style="font-size:13px;color:var(--text-muted);margin-bottom:12px">${cloudStatusLabel()}</div>
       ${!supa?.key ? `
-        <div class="field"><label>Clave pública del proyecto (anon key)</label>
-          <input id="supaKey" type="text" placeholder="eyJhbGciOi... (una sola vez)">
-          <div class="hint">Está en el panel de Supabase → Project Settings → API keys → <b>anon public</b>. Es la clave pública (segura para la app); se guarda solo en este dispositivo, nunca en el respaldo.</div></div>
+        <div class="field"><label>Clave pública del proyecto</label>
+          <input id="supaKey" type="text" placeholder="sb_publishable_... (una sola vez)">
+          <div class="hint">Está en el panel de Supabase → Project Settings → API keys. Sirve la <b>publishable</b> (<code>sb_publishable_…</code>) o la vieja <b>anon public</b> (<code>eyJhbGciOi…</code>). Es la clave pública, segura para la app; se guarda solo en este dispositivo, nunca en el respaldo.</div></div>
         <button class="btn sm" id="supaSaveKey">Guardar clave</button>`
       : !supa?.refresh_token ? `
         <div style="display:flex;gap:10px;flex-wrap:wrap">
@@ -2439,7 +2510,21 @@ function renderAttach() {
   else $('#pickPhoto').onclick = () => pickPhoto(url => { mAttach = url; renderAttach(); });
 }
 function photoView(src) { if (!src) return; openModal({ title: 'Comprobante', body: `<div class="photo-full"><img src="${src}"></div>` }); }
-function photoModal(id) { photoView(state.movements.find(x => x.id === id)?.attachment); }
+// Los movimientos cargados por Telegram no traen la foto embebida: guardan la ruta
+// en el bucket privado y se abren con una URL firmada al momento de mirarlas.
+async function photoModal(id) {
+  const m = state.movements.find(x => x.id === id);
+  if (!m) return;
+  if (m.attachment) return photoView(m.attachment);
+  if (!m.attachmentPath) return;
+  if (!cloudReady()) return toast('Conectate a la nube para ver esta foto');
+  try {
+    const res = await supaFetch('/storage/v1/object/sign/comprobantes/' + m.attachmentPath,
+      { method: 'POST', body: JSON.stringify({ expiresIn: 3600 }) });
+    if (!res.ok) throw 0;
+    photoView(SUPA_URL + '/storage/v1' + (await res.json()).signedURL);
+  } catch { toast('No pude abrir el comprobante'); }
+}
 
 // ---------- Modal: Nuevo movimiento ----------
 let mType = 'expense', mPreset = null, mEditId = null;
