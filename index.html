@@ -463,7 +463,17 @@ function save() {
 // La anon key se pega una vez en Config y vive en localStorage['gf-supa'] (nunca en el código ni en el export).
 const SUPA_URL = 'https://lpdwtnzqtfjulsfmrnso.supabase.co';
 let supa = (() => { try { return JSON.parse(localStorage.getItem('gf-supa')) || null; } catch { return null; } })();
-function saveSupa() { if (supa) localStorage.setItem('gf-supa', JSON.stringify(supa)); else localStorage.removeItem('gf-supa'); }
+// Si la configuración guardada es de otro proyecto (pasó en la migración del 2026-07-24),
+// se descarta sola: ni la clave ni los tokens de un proyecto sirven en otro, y quedarse
+// con los viejos deja la app "conectada" contra un servidor que ya no es el suyo.
+// Las configuraciones viejas no guardaban `url`: se tratan como de otro proyecto (lo
+// único que cuesta es volver a pegar la clave; el estado local no se toca).
+let supaMudanza = false;
+if (supa && supa.url !== SUPA_URL) { supa = null; supaMudanza = true; localStorage.removeItem('gf-supa'); }
+function saveSupa() {
+  if (supa) { supa.url = SUPA_URL; localStorage.setItem('gf-supa', JSON.stringify(supa)); }
+  else localStorage.removeItem('gf-supa');
+}
 let cloudStatus = supa?.refresh_token ? 'idle' : 'off'; // off | idle | sync | ok | error
 let cloudMsg = '';
 function setCloudStatus(s, msg) {
@@ -603,8 +613,11 @@ async function cloudInit() {
   setCloudStatus('sync');
   const row = await cloudPull();
   if (row === undefined) { setCloudStatus('error', 'No se pudo consultar la nube'); return; }
-  // Primera sync en este dispositivo y hay datos de los dos lados → preguntar antes de pisar nada.
-  if (row && !supa.lastSync && stateSize(state) > 0 && stateSize(row.data) > 0) {
+  // Preguntar antes de pisar nada si: es la primera sync de este dispositivo, o si la nube
+  // trae MENOS contenido que lo que hay acá (pasa al cambiar de proyecto, o si otro
+  // dispositivo subió una foto vieja). La fecha sola no alcanza: más nuevo ≠ más completo.
+  if (row && stateSize(state) > 0 && stateSize(row.data) > 0 &&
+      (!supa.lastSync || stateSize(row.data) < stateSize(state))) {
     setCloudStatus('idle');
     return syncChoiceModal(row);
   }
@@ -3148,6 +3161,8 @@ render(); // pinta rápido con lo local; puebla #lensSel antes de medir el nav
 layoutNav();
 // Luego: baja de la nube si hay algo más nuevo, recién ahí corre los recurrentes automáticos.
 cloudInit().catch(() => {}).finally(() => { processRecurring(); render(); fetchRates(); });
+// La nube cambió de proyecto: hay que volver a conectar (los datos locales están intactos).
+if (supaMudanza) setTimeout(() => toast('☁ La nube se mudó de servidor: reconectá en Config → Nube'), 800);
 if (localStorage.getItem('gf-pin')) showLock();
 </script>
 </body>
