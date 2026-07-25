@@ -176,6 +176,16 @@
   @media (min-width: 561px) { .row .info .title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } }
   .row .info .subtitle { font-size: 12.5px; color: var(--text-muted); display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
   .row .amt { font-weight: 700; font-size: 15px; white-space: nowrap; }
+  /* Celular: si el título + el monto + los botones no entran en una línea, la plata y las
+     acciones bajan juntas a una segunda línea (alineadas a la derecha) y el título se queda
+     con el ancho completo. Antes competían por el mismo renglón y el título terminaba en una
+     columna de ~50px que partía las palabras letra por letra ("Comp/ra de/nafta"). El basis
+     de 165px es el umbral: lo que entra cómodo sigue en un solo renglón (billeteras, montos
+     cortos) y solo baja lo que no entraba. */
+  @media (max-width: 560px) {
+    .row { flex-wrap: wrap; justify-content: flex-end; row-gap: 6px; }
+    .row .info { flex-basis: 165px; }
+  }
   .row .del { border: none; background: transparent; color: var(--text-soft); font-size: 15px; padding: 4px 6px; border-radius: 7px; }
   /* En mouse fino se oculta hasta el hover (menos ruido visual); en touch (sin hover real)
      queda siempre visible, porque si no el botón nunca aparece con un solo tap. */
