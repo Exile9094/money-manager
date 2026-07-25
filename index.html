@@ -146,6 +146,10 @@
   details.section > summary:hover { color: var(--text); border-color: var(--brand); }
   details.section > summary:hover .chev { color: var(--brand); }
   details.section > summary .badge { text-transform: none; letter-spacing: 0; }
+  /* Recordatorios: es un aviso, no una sección más — su encabezado va en color de alerta
+     y con algo de aire abajo (antes era una card suelta con margin-bottom propio). */
+  details.section[data-sec="dash-reminders"] { margin-bottom: 18px; }
+  details.section[data-sec="dash-reminders"] > summary { color: var(--warn); border-color: var(--warn); }
 
   .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
   .grid { display: grid; gap: 14px; }
@@ -926,6 +930,13 @@ function emptyBox(icon, text) { return `<div class="empty"><div class="big">${ic
 // Cada vista arma sus bloques con section(id, título, contenido) en vez de <h2>+<div class="card">.
 // El estado abierto/cerrado se persiste por id en localStorage y sobrevive a los render() (que reconstruyen el DOM).
 const collapsed = new Set(JSON.parse(localStorage.getItem('gf-collapsed') || '[]'));
+// Los recordatorios nacen PLEGADOS (pedido del usuario: ver el contador y abrir solo si querés).
+// Se siembra una única vez por dispositivo: si después el usuario lo deja abierto, se respeta.
+if (!localStorage.getItem('gf-rem-seed')) {
+  collapsed.add('dash-reminders');
+  localStorage.setItem('gf-collapsed', JSON.stringify([...collapsed]));
+  localStorage.setItem('gf-rem-seed', '1');
+}
 // title puede traer HTML ya armado por el caller (ej. con esc() aplicado a partes dinámicas); no se escapa de nuevo acá.
 function section(id, title, bodyHtml, badge = '') {
   const open = !collapsed.has(id);
@@ -2905,10 +2916,11 @@ function remindersHTML() {
       ${action}
     </div>`;
   }).join('');
-  return `<div class="card" style="margin-bottom:16px;border:1.5px solid var(--warn)">
-    <div style="padding:12px 16px 4px;font-weight:700;font-size:13.5px">🔔 Recordatorios de pago <span class="badge" style="background:var(--warn);color:#fff">${list.length}</span></div>
-    <div class="list" style="padding-bottom:4px">${rows}</div>
-  </div>`;
+  // Plegable (como el resto de las secciones): de entrada se ve solo el encabezado con el
+  // contador, y se toca para abrir. Pedido del usuario: que no ocupe media pantalla al entrar.
+  return section('dash-reminders', '🔔 Recordatorios de pago',
+    `<div class="card" style="border:1.5px solid var(--warn)"><div class="list" style="padding:4px 6px">${rows}</div></div>`,
+    ` <span class="badge" style="background:var(--warn);color:#fff">${list.length}</span>`);
 }
 
 // ---------- Proyección mes a mes de recurrentes ----------
