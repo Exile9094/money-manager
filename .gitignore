@@ -1,3 +1,10 @@
 *
 !index.html
 !.gitignore
+# PWA (públicos por diseño, sin secretos): instalable + offline en GitHub Pages
+!manifest.webmanifest
+!sw.js
+!icon-192.png
+!icon-512.png
+!icon-maskable.png
+!apple-touch-icon.png

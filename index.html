@@ -2,8 +2,23 @@
 <html lang="es-AR">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Gestor de Finanzas</title>
+<!-- PWA: instalable + offline. El manifest/íconos/sw viven junto a index.html en GitHub Pages. -->
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#1f3a5f">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Finanzas">
+<meta name="mobile-web-app-capable" content="yes">
+<script>
+  // Registrar el service worker solo servido por HTTPS (no en file://, donde no aplica).
+  if ('serviceWorker' in navigator && location.protocol === 'https:') {
+    addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+  }
+</script>
 <style>
   :root {
     /* Identidad "libro mayor": papel de contabilidad verde pálido + tinta azul marino */
@@ -65,8 +80,10 @@
     position: sticky; top: 0; z-index: 20;
     background: color-mix(in srgb, var(--surface) 85%, transparent);
     backdrop-filter: blur(12px); border-bottom: 1px solid var(--border);
+    /* PWA en pantalla completa: dejar respirar el notch / barra de estado del celular. */
+    padding-top: env(safe-area-inset-top);
   }
-  .appbar-inner { max-width: 1080px; margin: 0 auto; padding: 12px 20px; display: flex; align-items: center; gap: 14px; }
+  .appbar-inner { max-width: 1080px; margin: 0 auto; padding: 12px 20px; padding-left: max(20px, env(safe-area-inset-left)); padding-right: max(20px, env(safe-area-inset-right)); display: flex; align-items: center; gap: 14px; }
   /* Ancho fijo para los hermanos del nav: si pudieran achicarse, el cálculo de layoutNav() (que resta
      sus anchos para saber cuánto le queda al nav) dejaría de ser confiable. */
   .appbar-inner > .brand, .appbar-inner > select, .appbar-inner > .btn { flex: none; min-width: 0; }
