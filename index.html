@@ -544,8 +544,10 @@ function cloudLoginModal() {
       const btn = $('#okLogin'); btn.disabled = true; btn.textContent = 'Conectando…';
       try {
         await cloudLogin(email, pass);
-        closeModal(); toast('Conectado ✓'); render();
-        cloudInit();
+        closeModal();
+        await cloudInit();
+        toast(cloudStatus === 'error' ? 'Conectado, pero no se pudo bajar tus datos — reintentá con conexión' : 'Conectado ✓');
+        render();
       } catch (e) { btn.disabled = false; btn.textContent = 'Entrar'; toast(e.message || 'No se pudo conectar'); }
     } });
 }
@@ -2312,9 +2314,24 @@ function renderConfig() {
   if ($('#cloudLoginBtn')) $('#cloudLoginBtn').onclick = cloudLoginModal;
   if ($('#supaForget')) $('#supaForget').onclick = () => { supa = null; saveSupa(); cloudStatus = 'off'; render(); };
   if ($('#cloudSyncNow')) $('#cloudSyncNow').onclick = () => cloudInit();
-  if ($('#cloudLogout')) $('#cloudLogout').onclick = () => {
-    if (!confirm('¿Cerrar sesión de la nube? Los datos locales quedan intactos.')) return;
-    supa = { key: supa.key }; saveSupa(); cloudStatus = 'off'; render();
+  if ($('#cloudLogout')) $('#cloudLogout').onclick = async () => {
+    if (!confirm('¿Cerrar sesión de la nube? Se borran los datos de este dispositivo (quedan a salvo en la nube) y vas a tener que volver a iniciar sesión para verlos.')) return;
+    const btn = $('#cloudLogout'); if (btn) { btn.disabled = true; btn.textContent = 'Cerrando sesión…'; }
+    // Antes de borrar la pantalla, confirmamos que no quede nada local sin subir.
+    // Si no hay conexión, abortamos: nunca dejar al usuario sin ver sus propios datos.
+    const subioOk = await cloudPush();
+    if (!subioOk) {
+      if (btn) { btn.disabled = false; btn.textContent = 'Cerrar sesión'; }
+      toast('Sin conexión: no se pudo confirmar el respaldo. Probá de nuevo con internet.');
+      return;
+    }
+    try { localStorage.setItem('gf-backup', JSON.stringify({ at: new Date().toISOString(), state })); } catch {}
+    supa = { key: supa.key }; saveSupa(); cloudStatus = 'off';
+    state = seed(); migrate();
+    try { localStorage.setItem(KEY, JSON.stringify(state)); } catch {}
+    lens = 'all'; localStorage.setItem('gf-lens', 'all');
+    render();
+    toast('Sesión cerrada. Iniciá sesión para ver tus datos.');
   };
   $('#saveFx').onclick = () => {
     document.querySelectorAll('[data-fx]').forEach(inp => {
