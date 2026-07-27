@@ -573,6 +573,25 @@ async function cloudPull() { // → {data, updated_at} | null (sin fila) | undef
     return rows.length ? rows[0] : null;
   } catch { return undefined; }
 }
+// Un movimiento que viene de otro lado puede usar una billetera, unidad o categoría que acá
+// todavía no existe: el bot las crea por chat ("crear_billetera"), y la app las puede crear
+// sin señal. Los saldos se DERIVAN recorriendo las billeteras y unidades que existen, así que
+// un posting que apunta a algo ausente no se suma en ningún lado: la plata desaparece del
+// total sin ningún aviso. Por eso, junto con el movimiento se trae lo que necesita para vivir.
+function adoptEntities(movs, desde) {
+  const traer = (coll, id) => {
+    if (!id || !Array.isArray(desde?.[coll]) || !Array.isArray(state[coll])) return;
+    if (state[coll].some(x => x.id === id)) return;
+    const orig = desde[coll].find(x => x.id === id);
+    if (!orig) return;
+    state[coll].push(orig);
+    if (orig.parentId) traer(coll, orig.parentId); // la madre / la marca también, o queda huérfana
+  };
+  for (const m of movs) {
+    traer('categories', m.categoryId);
+    for (const p of (m.postings || [])) { traer('wallets', p.walletId); traer('units', p.unitId); }
+  }
+}
 // Incorpora movimientos que están en la nube y no acá (los que carga el bot de Telegram).
 // Solo agrega: nunca borra nada local, así un push viejo no puede hacer desaparecer datos.
 function mergeRemoteMovements(remote) {
@@ -580,9 +599,31 @@ function mergeRemoteMovements(remote) {
   const tengo = new Set(state.movements.map(m => m.id));
   const nuevos = remote.movements.filter(m => m && m.id && !tengo.has(m.id));
   if (!nuevos.length) return 0;
+  adoptEntities(nuevos, remote);
   state.movements.push(...nuevos);
   try { localStorage.setItem(KEY, JSON.stringify(state)); } catch {}
   return nuevos.length;
+}
+// Lo que se cargó en ESTE dispositivo y la nube todavía no tiene (típico: gastos cargados
+// sin señal, que nunca se llegaron a subir).
+function localOnlyMovements(remote) {
+  const alla = new Set((remote?.movements || []).map(m => m && m.id));
+  return (state.movements || []).filter(m => m && m.id && !alla.has(m.id));
+}
+// Reemplaza el estado local por el de la nube SIN perder lo que solo existía acá.
+// Antes esto era `state = row.data` a secas, y ahí estaba el agujero: si el bot había cargado
+// algo (nube más nueva) y en el celular se habían cargado gastos sin señal, esos gastos
+// desaparecían de la app al reabrirla con internet. Devuelve cuántos movimientos se rescataron.
+function adoptCloudState(remote) {
+  const previo = state;
+  const rescatados = localOnlyMovements(remote);
+  state = remote;
+  migrate();
+  if (rescatados.length) {
+    adoptEntities(rescatados, previo); // se traen con su billetera/unidad/categoría
+    state.movements.push(...rescatados);
+  }
+  return rescatados.length;
 }
 async function cloudPush() {
   if (!cloudReady()) return false;
@@ -658,10 +699,16 @@ async function cloudInit() {
     // Copia de rescate antes de reemplazar lo local: si algo se cargó offline en este
     // dispositivo y la nube venía más nueva, no se pierde en silencio.
     try { localStorage.setItem('gf-backup', JSON.stringify({ at: new Date().toISOString(), state })); } catch {}
-    state = row.data; migrate();
+    const rescatados = adoptCloudState(row.data);
     try { localStorage.setItem(KEY, JSON.stringify(state)); } catch {}
     supa.lastSync = new Date().toISOString(); saveSupa(); setCloudStatus('ok');
     render();
+    // Lo que solo estaba en este dispositivo todavía no está en la nube: subirlo ahora,
+    // así deja de depender de que alguien vuelva a tocar algo para que se guarde.
+    if (rescatados) {
+      await cloudPush();
+      toast(`Se recuperaron ${rescatados} movimiento${rescatados > 1 ? 's' : ''} que estaban solo en este dispositivo`);
+    }
   } else {
     await cloudPush();
   }
