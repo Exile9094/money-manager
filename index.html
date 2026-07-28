@@ -370,6 +370,7 @@
   .attach-preview .rm { position: absolute; top: 8px; right: 8px; width: 30px; height: 30px; border: none; border-radius: 8px; background: rgba(0,0,0,.6); color: #fff; font-size: 15px; }
   .clip { color: var(--text-soft); font-size: 13px; padding: 2px 4px; }
   .photo-full img { width: 100%; border-radius: 12px; display: block; }
+  .pdf-full { width: 100%; height: 60vh; border: 1px solid var(--border); border-radius: 12px; display: block; background: var(--surface-2); }
 
   /* Chart de tendencia */
   .trend-hero { font-size: 30px; font-weight: 800; letter-spacing: -.025em; line-height: 1.1; font-variant-numeric: tabular-nums; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
@@ -2874,7 +2875,18 @@ function renderAttach() {
   if (mAttach) $('#rmAttach').onclick = () => { mAttach = null; renderAttach(); };
   else $('#pickPhoto').onclick = () => pickPhoto(url => { mAttach = url; renderAttach(); });
 }
-function photoView(src) { if (!src) return; openModal({ title: 'Comprobante', body: `<div class="photo-full"><img src="${src}"></div>` }); }
+// El comprobante puede ser una foto o un PDF (los que se mandan al bot como archivo). Un PDF
+// dentro de un <img> es un cuadro roto: se muestra embebido y con salida a pestaña nueva.
+function photoView(src, esPdf = false) {
+  if (!src) return;
+  openModal({
+    title: 'Comprobante',
+    body: esPdf
+      ? `<object data="${src}" type="application/pdf" class="pdf-full"><div class="hint">Tu navegador no lo muestra acá.</div></object>
+         <div class="modal-actions"><a class="btn ghost" href="${src}" target="_blank" rel="noopener">Abrir en otra pestaña</a></div>`
+      : `<div class="photo-full"><img src="${src}"></div>`,
+  });
+}
 // Los movimientos cargados por Telegram no traen la foto embebida: guardan la ruta
 // en el bucket privado y se abren con una URL firmada al momento de mirarlas.
 async function photoModal(id) {
@@ -2887,7 +2899,7 @@ async function photoModal(id) {
     const res = await supaFetch('/storage/v1/object/sign/comprobantes/' + m.attachmentPath,
       { method: 'POST', body: JSON.stringify({ expiresIn: 3600 }) });
     if (!res.ok) throw 0;
-    photoView(SUPA_URL + '/storage/v1' + (await res.json()).signedURL);
+    photoView(SUPA_URL + '/storage/v1' + (await res.json()).signedURL, /\.pdf$/i.test(m.attachmentPath));
   } catch { toast('No pude abrir el comprobante'); }
 }
 
