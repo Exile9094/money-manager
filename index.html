@@ -39,6 +39,11 @@
     --transfer-soft: #ecfeff;
     --warn: #d97706;
     --shadow: 0 1px 2px rgba(26,33,25,.05), 0 4px 16px rgba(26,33,25,.07);
+    /* Elevación en tres escalones: reposo, elemento levantado (hover) y capa flotante
+       (tooltip/modal). Tener los tres nombrados evita sombras inventadas caso por caso. */
+    --shadow-1: 0 1px 2px rgba(26,33,25,.06);
+    --shadow-2: 0 2px 6px rgba(26,33,25,.08), 0 12px 28px rgba(26,33,25,.10);
+    --border-strong: #bcc3a9;
     --radius: 16px;
     --radius-sm: 10px;
     --font-mono: ui-monospace, 'Cascadia Code', 'SF Mono', 'JetBrains Mono', 'Roboto Mono', Consolas, monospace;
@@ -64,6 +69,9 @@
     --transfer-soft: #0e2a30;
     --warn: #f59e0b;
     --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.35);
+    --shadow-1: 0 1px 2px rgba(0,0,0,.35);
+    --shadow-2: 0 2px 8px rgba(0,0,0,.4), 0 14px 32px rgba(0,0,0,.45);
+    --border-strong: #414a35;
     /* Paleta de gráficos — modo oscuro (mismos tonos ajustados) */
     --s1:#3987e5; --s2:#199e70; --s3:#c98500; --s4:#008300;
     --s5:#9085e9; --s6:#e66767; --s7:#d55181; --s8:#d95926;
@@ -157,19 +165,60 @@
   .grid.cols-2 { grid-template-columns: repeat(2, 1fr); }
   @media (max-width: 760px) { .grid.cols-3, .grid.cols-2 { grid-template-columns: 1fr; } }
 
-  .hero { padding: 22px 24px; }
-  .hero .label { font-size: 13px; color: var(--text-muted); font-weight: 600; }
-  .hero .total { font-size: 40px; font-weight: 800; letter-spacing: -.02em; margin-top: 4px; }
-  .hero .sub { display: flex; gap: 18px; margin-top: 14px; flex-wrap: wrap; }
-  .hero .sub .chip { font-size: 13px; color: var(--text-muted); }
-  .hero .sub .chip b { color: var(--text); font-weight: 700; }
+  /* El hero es lo primero que se mira: se le da una superficie propia, apenas elevada del
+     resto, con un velo de marca que la despega del fondo sin gritar. */
+  .hero { padding: 24px; position: relative; overflow: hidden; box-shadow: var(--shadow-2); }
+  .hero::before { content: ''; position: absolute; inset: 0; pointer-events: none;
+    background: radial-gradient(120% 140% at 100% 0%, color-mix(in srgb, var(--brand) 12%, transparent), transparent 60%); }
+  .hero > * { position: relative; }
+  .hero .label { font-size: 13px; color: var(--text-muted); font-weight: 600; letter-spacing: .01em; }
+  /* Tracking suave: el monoespaciado ya viene ancho, apretarlo de más lo vuelve ilegible. */
+  .hero .total { font-size: 44px; font-weight: 800; letter-spacing: -.02em; margin-top: 4px; font-variant-numeric: tabular-nums; line-height: 1.05; }
+  /* Celular: las pastillas del hero se compactan para que entren de a dos por renglón.
+     A tamaño de escritorio ocupaban siete líneas y empujaban todo lo demás fuera de vista. */
+  @media (max-width: 560px) {
+    .hero { padding: 20px; }
+    .hero .total { font-size: 34px; }
+    .hero .sub { gap: 6px; margin-top: 14px; }
+    .hero .sub .chip { font-size: 11.5px; padding: 4px 9px; gap: 4px; }
+  }
+  .hero .sub { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+  /* Cada dato del hero en su propia pastilla: antes eran textos sueltos separados por aire
+     y se leían como una sola frase larga. */
+  .hero .sub .chip { font-size: 12.5px; color: var(--text-muted); background: var(--surface-2);
+    border-radius: 999px; padding: 5px 11px; display: inline-flex; align-items: center; gap: 5px; }
+  .hero .sub .chip b { color: var(--text); font-weight: 700; font-variant-numeric: tabular-nums; }
 
   .stat { padding: 18px; }
   .stat .top { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
-  .stat .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  .stat .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 0%, var(--surface-2)); }
   .stat .name { font-weight: 600; font-size: 14px; }
-  .stat .amount { font-size: 24px; font-weight: 800; letter-spacing: -.01em; }
+  .stat .amount { font-size: 24px; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
   .stat .meta { font-size: 12px; color: var(--text-soft); margin-top: 2px; }
+  /* Lo que se puede tocar tiene que sentirse tocable: se levanta apenas y el borde se marca.
+     Sin esto, una tarjeta clickeable es indistinguible de una decorativa. */
+  .tappable { cursor: pointer; transition: transform .14s cubic-bezier(.2,.7,.3,1), box-shadow .14s, border-color .14s; }
+  .tappable:hover { transform: translateY(-2px); box-shadow: var(--shadow-2); border-color: var(--border-strong); }
+  .tappable:active { transform: translateY(0); }
+  @media (prefers-reduced-motion: reduce) { .tappable, .tappable:hover { transform: none; transition: box-shadow .14s; } }
+
+  /* Detalle de billetera */
+  .wallet-hero { padding: 4px 0 14px; }
+  .wallet-hero-amt { font-size: 34px; font-weight: 800; letter-spacing: -.03em; font-variant-numeric: tabular-nums; line-height: 1.1; }
+  .wallet-hero-amt.neg { color: var(--neg); }
+  .wallet-hero-sub { font-size: 12.5px; color: var(--text-soft); margin-top: 3px; }
+  .wallet-kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 18px; }
+  .wallet-kpi { background: var(--surface-2); border-radius: var(--radius-sm); padding: 10px 12px; }
+  .wallet-kpi .k { display: block; font-size: 11px; color: var(--text-soft); margin-bottom: 3px; }
+  .wallet-kpi b { font-size: 15px; font-variant-numeric: tabular-nums; }
+  .row.compact { padding: 9px 12px; gap: 10px; }
+  .row.compact .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+  /* Dentro del detalle de billetera el nombre de la billetera y el de la unidad ya están
+     arriba: repetirlos en cada fila solo roba el ancho que necesita el título. */
+  .wallet-movs .row { padding: 9px 10px; gap: 10px; }
+  .wallet-movs .row .badge.unit { display: none; }
+  .wallet-movs .row .avatar { width: 32px; height: 32px; border-radius: 9px; font-size: 15px; }
+  .wallet-movs .row .row-chev { display: none; }
 
   .list { padding: 6px; }
   .row { display: flex; align-items: center; gap: 14px; padding: 12px 14px; border-radius: 12px; transition: background .12s; }
@@ -179,7 +228,11 @@
   .row .info .title { font-weight: 600; font-size: 14.5px; overflow-wrap: break-word; }
   @media (min-width: 561px) { .row .info .title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } }
   .row .info .subtitle { font-size: 12.5px; color: var(--text-muted); display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-  .row .amt { font-weight: 700; font-size: 15px; white-space: nowrap; }
+  /* tabular-nums: los montos de una lista quedan alineados en columna aunque cambien los
+     dígitos. Sin esto, una lista de plata "baila" de fila en fila. */
+  .row .amt { font-weight: 700; font-size: 15px; white-space: nowrap; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+  .row .row-chev { transition: transform .14s, color .14s; }
+  .row:hover .row-chev { transform: translateX(2px); color: var(--text-muted); }
   /* Celular: si el título + el monto + los botones no entran en una línea, la plata y las
      acciones bajan juntas a una segunda línea (alineadas a la derecha) y el título se queda
      con el ancho completo. Antes competían por el mismo renglón y el título terminaba en una
@@ -319,13 +372,21 @@
   .photo-full img { width: 100%; border-radius: 12px; display: block; }
 
   /* Chart de tendencia */
-  .trend { width: 100%; height: 150px; display: block; touch-action: none; }
-  .trend .area { opacity: .14; }
-  .trend .line { fill: none; stroke-width: 2; }
-  .trend .dot-h { fill: var(--surface); stroke-width: 2; }
-  .trend .cross { stroke: var(--text-soft); stroke-width: 1; stroke-dasharray: 3 3; }
-  .trend-tip { position: absolute; pointer-events: none; background: var(--text); color: var(--bg); padding: 6px 10px; border-radius: 8px; font-size: 12px; font-weight: 600; white-space: nowrap; transform: translate(-50%, -130%); opacity: 0; transition: opacity .1s; z-index: 5; }
-  .trend-axis { font-size: 10px; fill: var(--text-soft); }
+  .trend-hero { font-size: 30px; font-weight: 800; letter-spacing: -.025em; line-height: 1.1; font-variant-numeric: tabular-nums; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .trend-delta { font-size: 13px; font-weight: 700; padding: 3px 9px; border-radius: 999px; letter-spacing: 0; }
+  .trend-delta.pos { color: var(--pos); background: var(--pos-soft); }
+  .trend-delta.neg { color: var(--neg); background: var(--neg-soft); }
+  .trend-wrap { position: relative; }
+  .trend { width: 100%; height: 220px; display: block; touch-action: none; cursor: crosshair; }
+  .trend .line { fill: none; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+  .trend .cross { stroke: var(--border-strong); stroke-width: 1; stroke-dasharray: 3 3; }
+  /* El punto de hoy: anillo del color de fondo para que se despegue de la línea. */
+  .trend .trend-now { fill: var(--brand); stroke: var(--surface); stroke-width: 2.5; }
+  .trend .trend-hit { fill: var(--brand); stroke: var(--surface); stroke-width: 3; }
+  .trend .trend-grid { stroke: var(--border); stroke-width: 1; }
+  .trend-tip { position: absolute; pointer-events: none; background: var(--text); color: var(--bg); padding: 7px 11px; border-radius: 10px; font-size: 12.5px; font-weight: 700; white-space: nowrap; transform: translate(-50%, -140%); opacity: 0; transition: opacity .12s; z-index: 5; box-shadow: var(--shadow-2); font-variant-numeric: tabular-nums; }
+  .trend-tip .k { display: block; font-size: 10.5px; font-weight: 600; opacity: .65; text-transform: capitalize; }
+  .trend-axis { font-size: 11px; fill: var(--text-soft); font-variant-numeric: tabular-nums; }
 
   /* Pantalla de bloqueo */
   .lock { position: fixed; inset: 0; background: var(--bg); z-index: 200; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 22px; padding: 24px; }
@@ -357,6 +418,42 @@
     .app, .main { max-width: 100% !important; padding: 0 !important; }
     .amt, .total, .amount { color: #000 !important; }
   }
+
+  /* ---------- Terminaciones ----------
+     Detalles chicos que separan "funciona" de "se siente bien hecho". */
+
+  /* Foco visible SOLO por teclado (:focus-visible, no :focus): quien navega con Tab nunca
+     pierde de vista dónde está parado, y el que usa el mouse no ve halos por todos lados. */
+  :where(button, a, select, input, textarea, summary, [tabindex]):focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: 2px;
+    border-radius: 8px;
+  }
+  /* El botón principal pesa un poco más que el resto: es la acción que se busca. */
+  .btn:not(.ghost):not(.danger) { box-shadow: var(--shadow-1); }
+  .btn:not(.ghost):not(.danger):hover { box-shadow: var(--shadow-2); }
+  .icon-btn:hover { box-shadow: var(--shadow-1); }
+  /* Los selects traen su propia flecha del sistema, que no combina con nada: se reemplaza
+     por una dibujada, igual en las dos plataformas y en los dos temas. */
+  select {
+    appearance: none; -webkit-appearance: none;
+    background-image: linear-gradient(45deg, transparent 50%, var(--text-soft) 50%),
+                      linear-gradient(135deg, var(--text-soft) 50%, transparent 50%);
+    background-position: right 14px center, right 9px center;
+    background-size: 5px 5px, 5px 5px;
+    background-repeat: no-repeat;
+    padding-right: 30px;
+  }
+  /* Barra de scroll discreta: la del sistema en Windows es ancha y gris cemento. */
+  * { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 999px; border: 3px solid var(--bg); }
+  ::-webkit-scrollbar-thumb:hover { background: var(--text-soft); }
+  ::-webkit-scrollbar-track { background: transparent; }
+  /* Al tocar en el celular, el resaltado azul del sistema arruina cualquier diseño. */
+  * { -webkit-tap-highlight-color: transparent; }
+  /* Encabezado de sección: la línea que lo acompaña ahora se desvanece en vez de cortarse seco. */
+  details.section > summary { letter-spacing: .06em; }
 </style>
 </head>
 <body>
@@ -1129,7 +1226,9 @@ function renderDashboard() {
     const isSelf = lu && u.id === lu.id;
     const bal = isSelf ? unitBalance(u.id) : (kids.length ? unitGroupBalance(u.id) : unitBalance(u.id));
     const meta = isSelf ? 'Propio de la marca' : kids.length ? `Marca · ${kids.length} sub-negocio${kids.length > 1 ? 's' : ''}` : (u.kind === 'personal' ? 'Unidad personal' : (lu ? 'Sub-negocio' : 'Unidad de negocio'));
-    return `<div class="card stat">
+    // Tocar una tarjeta enfoca la app en esa cuenta (el lente), que es lo que uno espera
+    // al tocar "Lavadero": ver todo como si fuera lo único que existe.
+    return `<div class="card stat tappable" data-lens-to="${u.id}" title="Tocá para ver solo ${esc(u.name)}">
       <div class="top"><span class="dot" style="background:${unitColor(u)}"></span><span class="name">${esc(u.name)}</span></div>
       <div class="amount" style="color:${bal < 0 ? 'var(--neg)' : 'inherit'}">${fmt(bal)}</div>
       <div class="meta">${meta}</div>
@@ -1140,17 +1239,19 @@ function renderDashboard() {
     if (ids) {
       const part = walletLensNative(w, ids);
       if (Math.abs(part) < 0.005) return '';
-      return `<div class="row">
+      return `<div class="row" data-wallet="${w.id}" style="cursor:pointer" title="Tocá para ver el detalle">
         <div class="avatar" style="background:var(--surface-2)">${w.emoji || '👛'}</div>
         <div class="info"><div class="title">${esc(w.name)}</div><div class="subtitle">Parte de ${esc(lu.name)}${cur !== 'ARS' ? ' · ' + cur + ' · ≈ ' + fmt(toARS(part, cur)) : ''}</div></div>
         <div class="amt ${part < 0 ? 'neg' : ''}">${fmtCur(part, cur)}</div>
+        <span class="row-chev" aria-hidden="true">›</span>
       </div>`;
     }
     const bal = walletBalance(w.id);
-    return `<div class="row">
+    return `<div class="row" data-wallet="${w.id}" style="cursor:pointer" title="Tocá para ver el detalle">
       <div class="avatar" style="background:var(--surface-2)">${w.emoji || '👛'}</div>
       <div class="info"><div class="title">${esc(w.name)}</div><div class="subtitle">${cur === 'ARS' ? 'Billetera' : cur + ' · ≈ ' + fmt(toARS(bal, cur))}</div></div>
       <div class="amt ${bal < 0 ? 'neg' : ''}">${fmtCur(bal, cur)}</div>
+      <span class="row-chev" aria-hidden="true">›</span>
     </div>`;
   }).join('') || emptyBox('👛', ids ? 'Esta cuenta no tiene plata en ninguna billetera' : 'Agregá billeteras en Config');
   const recent = lensFilter([...state.movements]).sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id)).slice(0, 6)
@@ -1195,6 +1296,10 @@ function renderDashboard() {
     ${recActive.length ? section('dash-rec', 'Recurrentes · lo que se viene', `<div class="card list">${recHTML}</div>`) : ''}
     ${section('dash-wallets', `Billeteras${lu ? ' · plata de ' + esc(lu.name) : ''}`, `<div class="card list">${wallets}</div>`)}
     ${section('dash-recent', 'Últimos movimientos', `<div class="card list">${recent}</div>`)}`;
+  document.querySelectorAll('#view-dashboard [data-wallet]').forEach(r => r.onclick = () => walletDetailModal(r.dataset.wallet));
+  document.querySelectorAll('#view-dashboard [data-lens-to]').forEach(c => c.onclick = () => {
+    lens = c.dataset.lensTo; localStorage.setItem('gf-lens', lens); render();
+  });
   document.querySelectorAll('[data-rec]').forEach(b => b.onclick = () => registerRecurring(b.dataset.rec));
   document.querySelectorAll('[data-rem-pay]').forEach(b => b.onclick = () => payDebt(b.dataset.remPay));
   document.querySelectorAll('#view-dashboard [data-plan-pay]').forEach(b => b.onclick = () => payPlanInstallment(b.dataset.planPay));
@@ -1213,6 +1318,65 @@ function renderDashboard() {
   };
   if (ruS) ruS.onchange = saveRoundup;
   if (ruG) ruG.onchange = saveRoundup;
+}
+
+// ---------- Detalle de una billetera ----------
+// Las dos dimensiones se cruzan acá: una billetera puede tener plata de varias unidades.
+// Esta vista contesta "¿cuánto hay acá y de quién es?" sin salir del Panel.
+function walletDetailModal(id) {
+  const w = wallet(id); if (!w) return;
+  const cur = w.currency || 'ARS';
+  const bal = walletBalance(id);
+  const movs = state.movements
+    .filter(m => m.postings.some(p => p.walletId === id))
+    .sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id));
+  // Reparto por unidad: cuánto de este saldo es de cada cuenta (en moneda nativa).
+  const porUnidad = state.units.map(u => {
+    let v = (w.openingUnit === u.id) ? (w.opening || 0) : 0;
+    for (const m of movs) for (const p of m.postings) if (p.walletId === id && p.unitId === u.id) v += p.amount;
+    return { u, v };
+  }).filter(x => Math.abs(x.v) > 0.005).sort((a, b) => Math.abs(b.v) - Math.abs(a.v));
+  const mes = todayISO().slice(0, 7);
+  const delMes = movs.filter(m => m.date.slice(0, 7) === mes);
+  const entro = delMes.reduce((s, m) => s + m.postings.filter(p => p.walletId === id && p.amount > 0).reduce((a, p) => a + p.amount, 0), 0);
+  const salio = delMes.reduce((s, m) => s + m.postings.filter(p => p.walletId === id && p.amount < 0).reduce((a, p) => a - p.amount, 0), 0);
+
+  openModal({
+    title: `${w.emoji || '👛'} ${esc(w.name)}`,
+    body: `
+      <div class="wallet-hero">
+        <div class="wallet-hero-amt ${bal < 0 ? 'neg' : ''}">${fmtCur(bal, cur)}</div>
+        <div class="wallet-hero-sub">Saldo actual${cur !== 'ARS' ? ` · ≈ ${fmt(toARS(bal, cur))}` : ''}</div>
+      </div>
+      <div class="wallet-kpis">
+        <div class="wallet-kpi"><span class="k">Entró este mes</span><b style="color:var(--pos)">${fmtCur(entro, cur)}</b></div>
+        <div class="wallet-kpi"><span class="k">Salió este mes</span><b style="color:var(--neg)">${fmtCur(salio, cur)}</b></div>
+        <div class="wallet-kpi"><span class="k">Movimientos</span><b>${movs.length}</b></div>
+      </div>
+      ${porUnidad.length ? `
+        <div class="field"><label>De quién es esta plata</label>
+          <div class="card list" style="box-shadow:none">
+            ${porUnidad.map(({ u, v }) => `<div class="row compact">
+              <span class="dot" style="background:${unitColor(u)}"></span>
+              <div class="info"><div class="title">${esc(u.name)}</div></div>
+              <div class="amt ${v < 0 ? 'neg' : ''}">${fmtCur(v, cur)}</div>
+            </div>`).join('')}
+          </div></div>` : ''}
+      <div class="field"><label>Últimos movimientos</label>
+        <div class="card list wallet-movs" style="box-shadow:none">
+          ${movs.slice(0, 8).map(m => movementRow(m)).join('') || emptyBox('📝', 'Todavía no hay movimientos en esta billetera')}
+        </div></div>
+      <div class="modal-actions">
+        <button class="btn ghost" id="wdAll">Ver todos en Movimientos</button>
+        <button class="btn" id="wdClose">Listo</button>
+      </div>`,
+    onOpen: () => {
+      $('#wdClose').onclick = closeModal;
+      // "Ver todos" deja el filtro puesto: el detalle es un vistazo, la lista es el trabajo fino.
+      $('#wdAll').onclick = () => { closeModal(); filterWallet = id; filterUnit = 'all'; filterType = 'all'; setView('movements'); };
+      document.querySelectorAll('.modal [data-mov]').forEach(r => r.onclick = () => { closeModal(); movementDetailModal(r.dataset.mov); });
+    },
+  });
 }
 
 // ---------- Fila de movimiento ----------
@@ -1387,37 +1551,110 @@ function donutSVG(data, cap = 'gastos') {
 }
 
 // ---------- Tendencia de patrimonio ----------
+// Patrimonio al cierre de cada corte. La ventana se ADAPTA a lo que hay cargado: mostrar
+// 12 meses fijos cuando la app se empezó a usar hace tres semanas dibuja once meses planos
+// en cero que no son un dato — son la ausencia de datos — y aplastan lo real contra el borde.
+// Con poca historia se pasa a cortes diarios, que es lo que de verdad se puede leer.
 function netWorthSeries(months) {
   const ids = lensIds(); // bajo lente: solo la parte del grupo elegido
   const totalOpening = state.wallets.reduce((s, w) => s + ((!ids || ids.has(w.openingUnit)) ? toARS(w.opening || 0, w.currency) : 0), 0);
-  const out = [];
-  for (let i = months - 1; i >= 0; i--) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i + 1, 0); // último día del mes
-    const end = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const movs = lensFilter(state.movements).filter(m => m.date);
+  const desde = movs.length ? movs.reduce((a, m) => m.date < a ? m.date : a, movs[0].date) : todayISO();
+  const valorAl = end => {
     let v = totalOpening;
     for (const m of state.movements) if (m.date <= end) for (const p of m.postings) if (!ids || ids.has(p.unitId)) v += postingARS(p);
-    out.push({ label: d.toLocaleDateString('es-AR', { month: 'short' }), value: v });
+    return v;
+  };
+  // Meses cumplidos de historia (0 = todo lo cargado es de este mes).
+  const mesesConDatos = (now.getFullYear() - +desde.slice(0, 4)) * 12 + (now.getMonth() - (+desde.slice(5, 7) - 1));
+  if (mesesConDatos < 2) {
+    // Historia corta → un punto por día desde el primer movimiento (tope 30 días, mínimo 7
+    // para que la línea tenga de dónde agarrarse en vez de ser un pico solitario).
+    const hoy = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const ini = new Date(desde + 'T00:00:00');
+    const dias = Math.min(30, Math.max(7, Math.round((hoy - ini) / 86400000) + 1));
+    const out = [];
+    for (let i = dias - 1; i >= 0; i--) {
+      const d = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate() - i);
+      out.push({ label: d.toLocaleDateString('es-AR', { day: 'numeric', month: 'short' }), value: valorAl(isoOf(d)) });
+    }
+    return out;
+  }
+  const n = Math.min(months, mesesConDatos + 1);
+  const out = [];
+  for (let i = n - 1; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i + 1, 0); // último día del mes
+    const end = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    out.push({ label: d.toLocaleDateString('es-AR', { month: 'short' }), value: valorAl(end) });
   }
   return out;
 }
 let trendGeo = null;
+// Monto corto para el eje ($1,2 M / $446 k): en el eje importa la magnitud, no el centavo.
+function fmtCorto(n) {
+  const a = Math.abs(n), s = n < 0 ? '-' : '';
+  if (a >= 1e9) return `${s}$${(a / 1e9).toFixed(1).replace('.', ',')} MM`;
+  if (a >= 1e6) return `${s}$${(a / 1e6).toFixed(1).replace('.', ',')} M`;
+  if (a >= 1e3) return `${s}$${Math.round(a / 1e3)} k`;
+  return `${s}$${Math.round(a)}`;
+}
+// El rango que se está mostrando, dicho en criollo: la ventana ahora es variable, así que
+// el texto tiene que seguirla (antes decía "últimos 12 meses" aunque hubiera 3 semanas).
+function trendRangoLabel(series) {
+  const n = series.length;
+  if (!n) return 'sin datos todavía';
+  const porDia = /\d/.test(series[0].label) && series[0].label.includes(' ');
+  if (porDia) return `últimos ${n} días`;
+  return n <= 1 ? 'este mes' : `últimos ${n} meses`;
+}
+// Cuánto se movió el patrimonio en la ventana visible. Un número solo no dice si vas bien:
+// lo que importa es si sube o baja.
+function trendDeltaHTML(series) {
+  if (series.length < 2) return '';
+  const ini = series[0].value, fin = series[series.length - 1].value, d = fin - ini;
+  if (Math.abs(d) < 0.005) return '';
+  const pct = Math.abs(ini) > 0.005 ? ` (${d > 0 ? '+' : '−'}${Math.abs(d / ini * 100).toFixed(1).replace('.', ',')}%)` : '';
+  return `<span class="trend-delta ${d > 0 ? 'pos' : 'neg'}">${d > 0 ? '▲' : '▼'} ${fmt(Math.abs(d))}${pct}</span>`;
+}
 function computeTrendGeo(series) {
-  const W = 320, H = 150, padX = 10, padTop = 14, padBot = 22, n = series.length;
-  const xs = series.map((_, i) => n > 1 ? padX + i * (W - 2 * padX) / (n - 1) : W / 2);
-  const vals = series.map(s => s.value); let min = Math.min(...vals), max = Math.max(...vals); if (min === max) { min -= 1; max += 1; }
+  // padL deja lugar a las etiquetas del eje Y (antes no había eje: la línea no decía cuánto).
+  const W = 640, H = 220, padL = 56, padR = 16, padTop = 18, padBot = 28, n = series.length;
+  const xs = series.map((_, i) => n > 1 ? padL + i * (W - padL - padR) / (n - 1) : (W + padL - padR) / 2);
+  const vals = series.map(s => s.value);
+  let min = Math.min(...vals), max = Math.max(...vals);
+  if (min === max) { const d = Math.abs(min) * 0.1 || 1; min -= d; max += d; }
+  // Un respiro arriba y abajo para que la línea no bese los bordes.
+  const aire = (max - min) * 0.12; min -= aire; max += aire;
+  if (min > 0 && min < (max - min)) min = 0; // si estamos cerca del cero, anclarlo: da escala real
   const y = v => padTop + (H - padTop - padBot) * (1 - (v - min) / (max - min));
-  return { W, H, padTop, padBot, xs, ys: series.map(s => y(s.value)), series };
+  return { W, H, padL, padR, padTop, padBot, min, max, xs, ys: series.map(s => y(s.value)), y, series };
 }
 function trendChartHTML(g) {
   const line = g.xs.map((x, i) => (i ? 'L' : 'M') + x.toFixed(1) + ' ' + g.ys[i].toFixed(1)).join(' ');
-  const area = line + ` L ${g.xs[g.xs.length - 1].toFixed(1)} ${g.H - g.padBot} L ${g.xs[0].toFixed(1)} ${g.H - g.padBot} Z`;
+  const base = g.H - g.padBot;
+  const area = line + ` L ${g.xs[g.xs.length - 1].toFixed(1)} ${base} L ${g.xs[0].toFixed(1)} ${base} Z`;
+  // Eje Y: tres referencias (piso, medio, techo). Recesivas: guían sin competir con el dato.
+  const ticks = [g.max, (g.max + g.min) / 2, g.min].map(v => {
+    const y = g.y(v).toFixed(1);
+    return `<line class="trend-grid" x1="${g.padL}" x2="${g.W - g.padR}" y1="${y}" y2="${y}"></line>
+      <text class="trend-axis" x="${g.padL - 8}" y="${y}" text-anchor="end" dominant-baseline="middle">${fmtCorto(v)}</text>`;
+  }).join('');
   const step = Math.ceil(g.series.length / 6);
-  const labels = g.series.map((s, i) => (i % step === 0 || i === g.series.length - 1) ? `<text class="trend-axis" x="${g.xs[i].toFixed(1)}" y="${g.H - 6}" text-anchor="middle">${s.label}</text>` : '').join('');
-  return `<div class="trend-wrap" style="position:relative">
-    <svg class="trend" id="trendSvg" viewBox="0 0 ${g.W} ${g.H}" preserveAspectRatio="none">
-      <path class="area" d="${area}" fill="var(--s1)"></path>
-      <path class="line" d="${line}" stroke="var(--s1)" vector-effect="non-scaling-stroke"></path>
-      <line class="cross" id="trendCross" vector-effect="non-scaling-stroke" style="display:none"></line>
+  const labels = g.series.map((s, i) => (i % step === 0 || i === g.series.length - 1)
+    ? `<text class="trend-axis" x="${g.xs[i].toFixed(1)}" y="${g.H - 8}" text-anchor="middle">${esc(s.label)}</text>` : '').join('');
+  const ux = g.xs[g.xs.length - 1].toFixed(1), uy = g.ys[g.ys.length - 1].toFixed(1);
+  return `<div class="trend-wrap">
+    <svg class="trend" id="trendSvg" viewBox="0 0 ${g.W} ${g.H}" role="img" aria-label="Evolución del patrimonio">
+      <defs><linearGradient id="trendFill" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="var(--brand)" stop-opacity=".28"></stop>
+        <stop offset="100%" stop-color="var(--brand)" stop-opacity="0"></stop>
+      </linearGradient></defs>
+      ${ticks}
+      <path class="area" d="${area}" fill="url(#trendFill)"></path>
+      <path class="line" d="${line}" stroke="var(--brand)"></path>
+      <line class="cross" id="trendCross" style="display:none"></line>
+      <circle class="trend-now" cx="${ux}" cy="${uy}" r="4.5"></circle>
+      <circle class="trend-hit" id="trendDot" cx="${ux}" cy="${uy}" r="5" style="display:none"></circle>
       ${labels}
     </svg>
     <div class="trend-tip" id="trendTip"></div>
@@ -1425,21 +1662,27 @@ function trendChartHTML(g) {
 }
 function wireTrend(root) {
   const g = trendGeo; if (!g) return;
-  const svg = root.querySelector('#trendSvg'), cross = root.querySelector('#trendCross'), tip = root.querySelector('#trendTip');
+  const svg = root.querySelector('#trendSvg'), cross = root.querySelector('#trendCross'),
+    tip = root.querySelector('#trendTip'), dot = root.querySelector('#trendDot');
   if (!svg) return;
   function show(clientX) {
     const rect = svg.getBoundingClientRect();
     const vx = (clientX - rect.left) / rect.width * g.W;
     let idx = 0, best = 1e9; g.xs.forEach((x, i) => { const d = Math.abs(x - vx); if (d < best) { best = d; idx = i; } });
     const s = g.series[idx];
-    cross.setAttribute('x1', g.xs[idx]); cross.setAttribute('x2', g.xs[idx]); cross.setAttribute('y1', g.padTop); cross.setAttribute('y2', g.H - g.padBot); cross.style.display = '';
+    cross.setAttribute('x1', g.xs[idx]); cross.setAttribute('x2', g.xs[idx]);
+    cross.setAttribute('y1', g.padTop); cross.setAttribute('y2', g.H - g.padBot); cross.style.display = '';
+    dot.setAttribute('cx', g.xs[idx]); dot.setAttribute('cy', g.ys[idx]); dot.style.display = '';
     tip.style.left = (g.xs[idx] / g.W * rect.width) + 'px';
     tip.style.top = (g.ys[idx] / g.H * rect.height) + 'px';
-    tip.textContent = s.label + ': ' + fmt(s.value); tip.style.opacity = '1';
+    tip.innerHTML = `<span class="k">${esc(s.label)}</span>${fmt(s.value)}`;
+    tip.style.opacity = '1';
   }
+  const ocultar = () => { cross.style.display = 'none'; dot.style.display = 'none'; tip.style.opacity = '0'; };
   svg.addEventListener('mousemove', e => show(e.clientX));
   svg.addEventListener('touchmove', e => { show(e.touches[0].clientX); e.preventDefault(); });
-  svg.addEventListener('mouseleave', () => { cross.style.display = 'none'; tip.style.opacity = '0'; });
+  svg.addEventListener('mouseleave', ocultar);
+  svg.addEventListener('touchend', ocultar);
 }
 
 function renderStats() {
@@ -1536,8 +1779,8 @@ function renderStats() {
     <div class="toolbar">${periodNavHTML()}<div style="flex:1"></div><button class="btn ghost sm" id="printStats" title="Imprimir o guardar como PDF">🖨</button></div>
     ${section('stats-trend', 'Evolución del patrimonio', `
     <div class="card" style="padding:16px">
-      <div style="font-size:22px;font-weight:800;letter-spacing:-.01em">${fmt(latest)}</div>
-      <div style="font-size:12px;color:var(--text-soft);margin:2px 0 12px">${lensUnit() ? 'Patrimonio de ' + esc(lensUnit().name) : 'Patrimonio total'} · últimos 12 meses</div>
+      <div class="trend-hero">${fmt(latest)}${trendDeltaHTML(series)}</div>
+      <div style="font-size:12px;color:var(--text-soft);margin:2px 0 14px">${lensUnit() ? 'Patrimonio de ' + esc(lensUnit().name) : 'Patrimonio total'} · ${trendRangoLabel(series)}</div>
       ${trendChartHTML(trendGeo)}
       <button class="btn ghost sm" id="simBtn" style="margin-top:10px">🔮 ¿Qué pasaría si…?</button>
     </div>`)}
@@ -2208,7 +2451,7 @@ function payDebt(id) {
 }
 
 // ---------- Vista: Movimientos ----------
-let filterUnit = 'all', filterType = 'all', filterRec = 'all', searchText = '';
+let filterUnit = 'all', filterType = 'all', filterRec = 'all', filterWallet = 'all', searchText = '';
 // Números al estilo argentino: "1.500,50" → 1500.5 (el punto es de miles).
 const parseSearchNum = s => parseFloat(String(s).replace(/\./g, '').replace(',', '.')) || 0;
 function renderMovements() {
@@ -2218,10 +2461,15 @@ function renderMovements() {
     .map(([v, l]) => `<option value="${v}" ${filterType === v ? 'selected' : ''}>${l}</option>`).join('');
   const recOpts = [['all', '✓ Todo'], ['pending', 'Sin conciliar'], ['done', 'Conciliados']]
     .map(([v, l]) => `<option value="${v}" ${filterRec === v ? 'selected' : ''}>${l}</option>`).join('');
+  // La unidad dice DE QUIÉN es la plata; la billetera, DÓNDE está. Son las dos dimensiones
+  // del ledger: poder filtrar por una sola de las dos dejaba media app sin buscar.
+  const walletOpts = ['<option value="all">Todas las billeteras</option>']
+    .concat(state.wallets.map(w => `<option value="${w.id}" ${filterWallet === w.id ? 'selected' : ''}>${esc((w.emoji ? w.emoji + ' ' : '') + w.name)}</option>`)).join('');
 
   let list = lensFilter(periodMovements()).sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id));
   if (filterType !== 'all') list = list.filter(m => m.type === filterType);
   if (filterUnit !== 'all') list = list.filter(m => m.postings.some(p => p.unitId === filterUnit));
+  if (filterWallet !== 'all') list = list.filter(m => m.postings.some(p => p.walletId === filterWallet));
   if (filterRec !== 'all') list = list.filter(m => filterRec === 'done' ? m.reconciled : !m.reconciled);
   if (searchText) {
     // Cada palabra debe matchear: texto (nota/categoría/billetera/unidad, sirve para #etiquetas) o monto (>5000, <2000, 1000-3000).
@@ -2244,6 +2492,7 @@ function renderMovements() {
     <div class="toolbar">${periodNavHTML()}</div>
     <div class="toolbar">
       <input id="search" type="text" placeholder="🔍 Buscar… (#etiqueta · >5000 · 1000-3000)" value="${esc(searchText)}" style="flex:1;min-width:140px">
+      <select id="fWallet">${walletOpts}</select>
       <select id="fUnit">${unitOpts}</select>
       <select id="fType">${typeOpts}</select>
       <select id="fRec" title="Conciliación con el banco">${recOpts}</select>
@@ -2252,6 +2501,7 @@ function renderMovements() {
     </div>
     <div class="card list">${rows}</div>`;
   wirePeriod(root);
+  $('#fWallet').onchange = e => { filterWallet = e.target.value; renderMovements(); };
   $('#fUnit').onchange = e => { filterUnit = e.target.value; renderMovements(); };
   $('#fType').onchange = e => { filterType = e.target.value; renderMovements(); };
   $('#fRec').onchange = e => { filterRec = e.target.value; renderMovements(); };
