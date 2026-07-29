@@ -6,7 +6,8 @@
 //     así una mejora publicada en GitHub Pages se toma al reabrir con internet.
 //
 // Subí el número de versión cuando cambien los assets cacheados para invalidar el caché viejo.
-const VERSION = "mm-v1";
+// Tiene que coincidir con APP_VERSION de index.html: subirlo es lo que tira el caché viejo.
+const VERSION = "mm-2026-07-29";
 const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./icon-maskable.png", "./apple-touch-icon.png"];
 
 self.addEventListener("install", (e) => {

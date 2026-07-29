@@ -432,6 +432,17 @@
     .amt, .total, .amount { color: #000 !important; }
   }
 
+  .pie-version { display: flex; align-items: center; justify-content: center; gap: 12px; flex-wrap: wrap;
+    margin: 26px 2px 8px; font-size: 12px; color: var(--text-soft); }
+  .pie-version b { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+
+  .ayuda { margin: -4px 2px 14px; }
+  .ayuda > summary { list-style: none; cursor: pointer; font-size: 12.5px; color: var(--text-soft); font-weight: 600; padding: 6px 0; display: inline-flex; align-items: center; gap: 6px; }
+  .ayuda > summary::-webkit-details-marker { display: none; }
+  .ayuda > summary::before { content: '?'; display: grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--surface-2); font-size: 10px; font-weight: 800; }
+  .ayuda > summary:hover { color: var(--text-muted); }
+  .ayuda > div { font-size: 12.5px; color: var(--text-muted); line-height: 1.55; padding: 4px 0 2px; max-width: 78ch; }
+
   .solo-mobile { display: none; }
   @media (max-width: 560px) {
     .solo-mobile { display: inline-flex; }
@@ -577,6 +588,10 @@ const esc = s => (s || '').replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>'
 
 // ---------- Estado ----------
 const KEY = 'gestor-finanzas-v1';
+// Versión de la app. SUBIRLA AL PUBLICAR (y el mismo valor en VERSION de sw.js, que es lo que
+// invalida el caché viejo). Se muestra en Config para poder responder "¿estoy viendo lo último?"
+// sin tener que adivinar.
+const APP_VERSION = '2026-07-29';
 let state = load() || seed();
 migrate();
 
@@ -1162,6 +1177,11 @@ if (!localStorage.getItem('gf-rem-seed')) {
   localStorage.setItem('gf-rem-seed', '1');
 }
 // title puede traer HTML ya armado por el caller (ej. con esc() aplicado a partes dinámicas); no se escapa de nuevo acá.
+// Las explicaciones largas ("qué significa este número") son útiles la primera vez y estorban
+// las siguientes: van plegadas, a un toque de distancia, en vez de comerse la pantalla siempre.
+function ayudaBox(texto) {
+  return `<details class="ayuda"><summary>¿Cómo se lee esto?</summary><div>${texto}</div></details>`;
+}
 function section(id, title, bodyHtml, badge = '') {
   const open = !collapsed.has(id);
   return `<details class="section" data-sec="${id}" ${open ? 'open' : ''}>
@@ -2149,7 +2169,7 @@ function renderBusiness() {
   const root = $('#view-business');
   root.innerHTML = `
     <div class="toolbar">${periodNavHTML()}<div style="flex:1"></div></div>
-    <div class="hint" style="margin:-4px 2px 14px">Resultado = ingresos − gastos del mes elegido, por unidad. Una <b>marca</b> agrupa sus sub-negocios y muestra el total consolidado (la marca también puede tener movimientos propios). Los <b>retiros de ganancias</b> (negocio → personal) y <b>aportes de capital</b> (personal → negocio) son transferencias entre unidades acumuladas de todo el tiempo; reclasifican la plata sin cambiar el saldo de la billetera.</div>
+    ${ayudaBox('<b>Resultado</b> = ingresos − gastos del mes elegido, por unidad. Una <b>marca</b> agrupa sus sub-negocios y muestra el total consolidado (la marca también puede tener movimientos propios). Los <b>retiros de ganancias</b> (negocio → personal) y <b>aportes de capital</b> (personal → negocio) son transferencias entre unidades acumuladas de todo el tiempo: reclasifican la plata sin cambiar el saldo de la billetera.')}
     ${cards || emptyBox('🏢', 'No hay unidades')}`;
   wirePeriod(root);
 }
@@ -2425,10 +2445,11 @@ function renderDebts() {
         <div class="amount" style="color:${neto < 0 ? 'var(--neg)' : 'inherit'}">${fmt(neto)}</div><div class="meta">activos + te deben − debés</div></div>
     </div>
     ${section('debt-cashflow', 'Próximos pagos · cuánto necesitás y cuándo', `<div class="card list">${cashRows || emptyBox('🙌', 'Nada previsto en las próximas semanas')}</div>`)}
-    <div class="toolbar" style="margin-top:8px"><h2 class="section" style="margin:0">Planes de pago</h2><div style="flex:1"></div><button class="btn ghost sm" id="addPlan">＋ Nuevo plan</button></div>
-    ${planCards || `<div class="hint" style="margin:0 2px 6px">Agrupá deudas que debés y dividilas en cuotas (mensuales, quincenales o semanales, con interés opcional). Cada cuota que pagues baja esas deudas solas.</div>`}
-    <h2 class="section">Por persona</h2>
-    ${personBlocks}`;
+    ${section('debt-plans', 'Planes de pago', `
+      <div style="display:flex;justify-content:flex-end;margin:-6px 2px 10px"><button class="btn ghost sm" id="addPlan">＋ Nuevo plan</button></div>
+      ${planCards || `<div class="hint" style="margin:0 2px 6px">Agrupá deudas que debés y dividilas en cuotas (mensuales, quincenales o semanales, con interés opcional). Cada cuota que pagues baja esas deudas solas.</div>`}`,
+      state.payplans.length ? ` <span class="badge">${state.payplans.length}</span>` : '')}
+    ${section('debt-people', 'Por persona', personBlocks)}`;
   root.querySelectorAll('[data-cashweek]').forEach(b => b.onclick = () => debtCashflowModal(b.dataset.cashweek));
   $('#addPlan').onclick = planModal;
   root.querySelectorAll('[data-plan-pay]').forEach(b => b.onclick = () => payPlanInstallment(b.dataset.planPay));
@@ -2730,7 +2751,11 @@ function renderConfig() {
       <button class="btn ghost sm" id="importBtn">⬆ Importar copia</button>
       <button class="btn ghost sm" id="importCsvBtn">📥 Importar CSV del banco</button>
       <button class="btn danger sm" id="resetBtn">Borrar todo</button>
-    </div>`)}`;
+    </div>`)}
+    <div class="pie-version">
+      Money Manager · versión <b>${APP_VERSION}</b>
+      <button class="btn ghost sm" id="checkUpdate">Buscar actualización</button>
+    </div>`;
 
   $('#addUnit').onclick = () => unitModal();
   $('#addWallet').onclick = () => walletModal();
@@ -2739,6 +2764,28 @@ function renderConfig() {
   $('#addRule').onclick = () => ruleModal();
   document.querySelectorAll('[data-del-rule]').forEach(b => b.onclick = () => { state.rules = state.rules.filter(x => x.id !== b.dataset.delRule); save(); render(); });
   $('#importCsvBtn').onclick = csvImportModal;
+  // "¿Estoy viendo la última versión?" — se contesta sola en vez de quedar en la duda.
+  if ($('#checkUpdate')) $('#checkUpdate').onclick = async () => {
+    toast('Buscando…');
+    try {
+      // Se pide el HTML publicado salteando el caché y se compara la versión que declara.
+      const res = await fetch(location.href.split('#')[0], { cache: 'reload' });
+      const txt = await res.text();
+      const remota = txt.match(/const APP_VERSION = '([^']+)'/)?.[1];
+      if (!remota) return toast('No se pudo comprobar (¿sin internet?)');
+      if (remota === APP_VERSION) return toast(`Ya tenés la última (${APP_VERSION}) ✓`);
+      if (confirm(`Hay una versión más nueva (${remota}). ¿Actualizo ahora?
+
+Tus datos no se tocan.`)) {
+        if ('serviceWorker' in navigator) {
+          const regs = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(regs.map(r => r.unregister()));
+        }
+        if (window.caches) { const ks = await caches.keys(); await Promise.all(ks.map(k => caches.delete(k))); }
+        location.reload(true);
+      }
+    } catch { toast('No se pudo comprobar (¿sin internet?)'); }
+  };
   $('#pinBtn').onclick = pinConfig;
   // Nube
   if ($('#supaSaveKey')) $('#supaSaveKey').onclick = () => {
