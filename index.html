@@ -2274,18 +2274,34 @@ function debtCashflowModal(key) {
 function payPlanInstallment(id) {
   const p = state.payplans.find(x => x.id === id); if (!p || !planActive(p)) return;
   const cuota = planCuota(p), n = (p.paidCount || 0) + 1;
-  const cw = state.wallets.filter(w => walletCur(w.id) === p.currency);
-  if (!cw.length) return toast(`No tenés ninguna billetera en ${p.currency} para registrar el pago`);
-  const w0 = cw[0].id, u0 = lensUnit() ? lens : state.units[0]?.id;
+  // Igual que en payDebt: la cuota puede pagarse desde una billetera de otra moneda.
+  if (!state.wallets.length) return toast('Primero creá una billetera en Config');
+  const w0 = (state.wallets.find(w => walletCur(w.id) === p.currency) || state.wallets[0]).id;
+  const u0 = lensUnit() ? lens : state.units[0]?.id;
   openModal({ title: `Pagar cuota ${n}/${p.installments}`,
     body: `<div class="hint" style="margin-top:0">Cuota <b>${fmtCur(cuota, p.currency)}</b> de <b>${esc(p.name)}</b>.</div>
-      <div class="two"><div class="field"><label>Sale de</label><select id="planPayWallet">${walletOptionsCur(p.currency, w0)}</select></div>
+      <div class="two"><div class="field"><label>Sale de</label><select id="planPayWallet">${walletOptions(w0)}</select></div>
         <div class="field"><label>Unidad</label><select id="planPayUnit">${unitOptions(u0)}</select></div></div>
+      <div id="planPayConv"></div>
       <div class="hint">Se registra como un gasto en esa billetera, además de bajar el capital de las deudas del plan.</div>
       <div class="modal-actions"><button class="btn" id="okPlanPay">Registrar pago</button></div>`,
     onOpen: () => {
+      const pintarConv = () => {
+        const curW = walletCur($('#planPayWallet').value), box = $('#planPayConv');
+        if (curW === p.currency) { box.innerHTML = ''; return; }
+        const sug = r2(convCur(cuota, p.currency, curW));
+        box.innerHTML = `<div class="field"><label>Lo que sale de la billetera (${curW})</label>
+          <input id="planPayReal" type="number" step="0.01" value="${sug}">
+          <div class="hint">Al cambio de hoy serían ${fmtCur(sug, curW)}. Si conseguiste otro precio, corregilo — la cuota igual cuenta como ${fmtCur(cuota, p.currency)}.</div></div>`;
+      };
+      pintarConv();
+      $('#planPayWallet').onchange = pintarConv;
       $('#okPlanPay').onclick = () => {
         const walletId = $('#planPayWallet').value, unitId = $('#planPayUnit').value;
+        const curW = walletCur(walletId);
+        const real = $('#planPayReal') ? parseFloat($('#planPayReal').value) : null;
+        const montoMov = r2(real != null && !isNaN(real) ? real : convCur(cuota, p.currency, curW));
+        if (!montoMov || montoMov <= 0) return toast('Revisá el monto que sale de la billetera');
         let restante = r2(p.capital / p.installments); // a las deudas va el capital; el interés no es deuda anotada
         const items = p.debtIds.map(i => state.debts.find(d => d.id === i)).filter(Boolean);
         for (const d of items) {
@@ -2295,9 +2311,10 @@ function payPlanInstallment(id) {
         }
         p.paidCount = (p.paidCount || 0) + 1;
         if (!planActive(p)) items.forEach(d => { d.paid = d.amount; }); // última cuota: saldar exacto (evita restos por redondeo)
-        state.movements.push({ id: uid(), type: 'expense', amount: cuota, date: todayISO(), categoryId: null,
-          note: `Cuota ${n}/${p.installments} · ${p.name}`, source: 'manual', attachment: null,
-          postings: [{ walletId, unitId, amount: -cuota }] });
+        const detalle = curW !== p.currency ? ` · ${fmtCur(cuota, p.currency)} al cambio` : '';
+        state.movements.push({ id: uid(), type: 'expense', amount: montoMov, date: todayISO(), categoryId: null,
+          note: `Cuota ${n}/${p.installments} · ${p.name}${detalle}`, source: 'manual', attachment: null,
+          postings: [{ walletId, unitId, amount: -montoMov }] });
         save(); closeModal(); render();
         toast(planActive(p) ? `Cuota ${p.paidCount}/${p.installments} pagada` : 'Plan completado 🎉 Deudas saldadas');
       };
@@ -2554,35 +2571,68 @@ function debtModal(id, presetPerson) {
       };
     } });
 }
+// Convierte entre dos monedas cualesquiera pasando por ARS, que es la base del sistema.
+const convCur = (v, de, a) => (de === a ? v : fromARS(toARS(v, de), a));
+
+// Pagar una deuda en OTRA moneda es lo normal acá: se deben 200 EUR, se compran con pesos y
+// se pagan. Antes esto ni se podía intentar —el modal exigía una billetera en la moneda de la
+// deuda y si no había, cortaba— así que un pago real quedaba sin registrar.
+// La deuda baja en SU moneda; de la billetera sale lo que realmente salió, en la suya. El
+// monto convertido se propone al cambio de hoy pero es editable: el tipo de cambio que se
+// consiguió es un dato del mundo, no una cuenta que la app pueda adivinar.
 function payDebt(id) {
   const d = state.debts.find(x => x.id === id); if (!d) return;
   if (debtInPlan(id)) return toast('Este ítem está en un plan de pago: pagá la cuota desde el plan');
+  if (!state.wallets.length) return toast('Primero creá una billetera en Config');
   const rem = debtRemaining(d), owe = debtDir(d) === 'owe';
   const what = d.name ? ` (${esc(d.name)})` : '';
-  const cw = state.wallets.filter(w => walletCur(w.id) === d.currency);
-  if (!cw.length) return toast(`No tenés ninguna billetera en ${d.currency} para registrar el movimiento`);
-  const w0 = cw[0].id, u0 = lensUnit() ? lens : state.units[0]?.id;
-  const registrar = v => {
+  // Se prefiere una billetera en la misma moneda si existe; si no, la primera.
+  const w0 = (state.wallets.find(w => walletCur(w.id) === d.currency) || state.wallets[0]).id;
+  const u0 = lensUnit() ? lens : state.units[0]?.id;
+
+  const registrar = (vDeuda, vBilletera) => {
     const walletId = $('#payWallet').value, unitId = $('#payUnit').value;
-    d.paid = Math.min(d.amount, (d.paid || 0) + v);
-    state.movements.push({ id: uid(), type: owe ? 'expense' : 'income', amount: v, date: todayISO(), categoryId: null,
-      note: `${owe ? 'Pago a' : 'Cobro de'} ${d.person}${what}`, source: 'manual', attachment: null,
-      postings: [{ walletId, unitId, amount: owe ? -v : v }] });
+    const curW = walletCur(walletId);
+    const monto = r2(vBilletera != null ? vBilletera : convCur(vDeuda, d.currency, curW));
+    if (!monto || monto <= 0) return toast('Revisá el monto que sale de la billetera');
+    d.paid = Math.min(d.amount, (d.paid || 0) + vDeuda);
+    const detalle = curW !== d.currency ? ` · ${fmtCur(vDeuda, d.currency)} al cambio` : '';
+    state.movements.push({ id: uid(), type: owe ? 'expense' : 'income', amount: monto, date: todayISO(), categoryId: null,
+      note: `${owe ? 'Pago a' : 'Cobro de'} ${d.person}${what}${detalle}`, source: 'manual', attachment: null,
+      postings: [{ walletId, unitId, amount: owe ? -monto : monto }] });
     save(); closeModal(); render();
     toast(debtRemaining(d) <= 0.005 ? (owe ? 'Deuda saldada 🎉' : 'Cobrado por completo 🎉') : (owe ? 'Pago registrado' : 'Cobro registrado'));
   };
+
   openModal({ title: owe ? 'Registrar pago' : 'Registrar cobro',
     body: `<div class="hint" style="margin-top:0">${owe ? `Le debés <b>${fmtCur(rem, d.currency)}</b> a ${esc(d.person)}${what}.` : `${esc(d.person)} te debe <b>${fmtCur(rem, d.currency)}</b>${what}.`}</div>
       <div class="field"><label>${owe ? 'Monto que pagás' : 'Monto que te paga'} (${d.currency})</label><input id="payAmt" type="number" step="0.01" value="${rem}" style="font-size:20px;font-weight:700;text-align:center"></div>
-      <div class="two"><div class="field"><label>${owe ? 'Sale de' : 'Entra a'}</label><select id="payWallet">${walletOptionsCur(d.currency, w0)}</select></div>
+      <div class="two"><div class="field"><label>${owe ? 'Sale de' : 'Entra a'}</label><select id="payWallet">${walletOptions(w0)}</select></div>
         <div class="field"><label>Unidad</label><select id="payUnit">${unitOptions(u0)}</select></div></div>
+      <div id="payConv"></div>
       <div class="hint">Además de descontarlo de la deuda, se registra como ${owe ? 'un gasto' : 'un ingreso'} en esa billetera.</div>
       <div class="modal-actions"><button class="btn ghost" id="payAll">${owe ? 'Saldar todo' : 'Cobrar todo'}</button><button class="btn" id="okPay">Registrar</button></div>`,
     onOpen: () => {
-      $('#payAll').onclick = () => registrar(rem);
+      // Cuando la billetera es de otra moneda aparece un segundo campo con lo que sale de
+      // verdad, para no inventar el tipo de cambio que consiguió la persona.
+      const pintarConv = () => {
+        const curW = walletCur($('#payWallet').value);
+        const box = $('#payConv');
+        if (curW === d.currency) { box.innerHTML = ''; return; }
+        const v = parseFloat($('#payAmt').value) || 0;
+        const sug = r2(convCur(v, d.currency, curW));
+        box.innerHTML = `<div class="field"><label>${owe ? 'Lo que sale de' : 'Lo que entra a'} la billetera (${curW})</label>
+          <input id="payReal" type="number" step="0.01" value="${sug}">
+          <div class="hint">Al cambio de hoy serían ${fmtCur(sug, curW)}. Si conseguiste otro precio, corregilo — la deuda igual baja ${fmtCur(v, d.currency)}.</div></div>`;
+      };
+      pintarConv();
+      $('#payWallet').onchange = pintarConv;
+      $('#payAmt').oninput = pintarConv;
+      const leerReal = () => { const el = $('#payReal'); return el ? parseFloat(el.value) : null; };
+      $('#payAll').onclick = () => registrar(rem, leerReal());
       $('#okPay').onclick = () => {
         const v = parseFloat($('#payAmt').value); if (!v || v <= 0) return toast('Ingresá un monto');
-        registrar(Math.min(rem, v));
+        registrar(Math.min(rem, v), leerReal());
       };
     } });
 }
