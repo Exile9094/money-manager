@@ -432,6 +432,24 @@
     .amt, .total, .amount { color: #000 !important; }
   }
 
+  /* Primera vez */
+  .modal .head h3:empty { display: none; }
+  /* Sin título, la ✕ se quedaba sola a la izquierda: se la manda a su lugar. */
+  .modal .head h3:empty + .icon-btn { margin-left: auto; }
+  .onb-hero { text-align: center; padding: 6px 4px 18px; }
+  .onb-logo { width: 62px; height: 62px; border-radius: 18px; margin: 0 auto 16px; display: grid; place-items: center;
+    background: linear-gradient(135deg, var(--brand), #3f6b4a); color: #fff; font-size: 30px; font-weight: 700; box-shadow: var(--shadow-2); }
+  .onb-hero h3 { font-size: 21px; letter-spacing: -.02em; margin-bottom: 10px; text-wrap: balance; }
+  .onb-hero p { font-size: 14px; color: var(--text-muted); line-height: 1.6; max-width: 42ch; margin: 0 auto; }
+  .onb-picks { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+  .onb-pick { display: flex; align-items: center; gap: 9px; padding: 12px 13px; border-radius: var(--radius-sm);
+    border: 1.5px solid var(--border); background: var(--surface); color: var(--text); font-weight: 600; font-size: 13.5px;
+    transition: border-color .14s, background .14s, transform .1s; text-align: left; }
+  .onb-pick .e { font-size: 17px; }
+  .onb-pick:hover { border-color: var(--border-strong); }
+  .onb-pick.on { border-color: var(--brand); background: var(--brand-soft); }
+  .onb-pick:active { transform: scale(.98); }
+
   .pie-version { display: flex; align-items: center; justify-content: center; gap: 12px; flex-wrap: wrap;
     margin: 26px 2px 8px; font-size: 12px; color: var(--text-soft); }
   .pie-version b { color: var(--text-muted); font-variant-numeric: tabular-nums; }
@@ -2971,6 +2989,146 @@ function toast(msg, opts = {}) {
   toastTimer = setTimeout(() => t.classList.remove('show'), opts.ms || (opts.accion ? 7000 : 1900));
 }
 
+// ---------- Comprobantes en la nube ----------
+// Una foto embebida como data URL pesa ~200 KB dentro del `state`, y el `state` entero se
+// guarda en localStorage (tope ~5 MB: unas 25 fotos y la app deja de poder guardar) y se sube
+// completo en cada cambio. Con sesión de nube, la foto va al bucket privado y el movimiento
+// guarda solo la ruta — que es lo que ya hace el bot de Telegram desde siempre.
+// Si no hay nube o la subida falla, se queda el data URL: nunca se pierde el comprobante.
+async function subirComprobante(dataUrl, movId) {
+  if (!dataUrl || !cloudReady() || !dataUrl.startsWith('data:')) return null;
+  try {
+    const uid = supa.user_id || jwtSub(supa.access_token);
+    if (!uid) return null;
+    const blob = await (await fetch(dataUrl)).blob();
+    if (!blob.size) return null;
+    const path = `${uid}/web/${movId}.jpg`;
+    const res = await supaFetch(`/storage/v1/object/comprobantes/${path}`, {
+      method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: blob,
+    });
+    return res.ok ? path : null;
+  } catch { return null; }
+}
+// Se llama después de guardar: el movimiento ya está en la lista y la foto se cambia por su
+// ruta cuando termina de subir. Así guardar nunca queda esperando a la red.
+function guardarComprobanteAparte(movId, dataUrl) {
+  if (!dataUrl || !cloudReady()) return;
+  subirComprobante(dataUrl, movId).then(path => {
+    if (!path) return; // sin nube o falló: se queda embebida, que igual funciona
+    const m = state.movements.find(x => x.id === movId);
+    if (!m || m.attachment !== dataUrl) return; // lo editaron mientras tanto: no pisar
+    m.attachment = null;
+    m.attachmentPath = path;
+    save();
+  });
+}
+
+// ---------- Primera vez ----------
+// Sin esto, alguien que abre la app por primera vez aterriza en billeteras y un "Mi Negocio"
+// sembrados que no son suyos, y tiene que adivinar qué borrar. Tres pasos, todos salteables:
+// dónde tenés la plata, cuánto hay, y si además manejás algún negocio.
+const ONBOARD_KEY = 'gf-onboarded';
+const BILLETERAS_SUGERIDAS = [
+  { name: 'Efectivo', emoji: '💵' },
+  { name: 'Mercado Pago', emoji: '🟦' },
+  { name: 'Banco', emoji: '🏦' },
+  { name: 'Ualá', emoji: '🟣' },
+  { name: 'Dólares', emoji: '💵', currency: 'USD' },
+];
+function necesitaOnboarding() {
+  return !localStorage.getItem(ONBOARD_KEY) && !state.movements.length && !supa?.refresh_token;
+}
+let onbPaso = 1, onbElegidas = ['Efectivo', 'Mercado Pago'], onbNegocios = [];
+function onboardingModal() {
+  const cerrar = () => { localStorage.setItem(ONBOARD_KEY, '1'); closeModal(); render(); };
+
+  function pintar() {
+    const body = $('#modalBody');
+    if (!body) return;
+    if (onbPaso === 1) {
+      body.innerHTML = `
+        <div class="onb-hero">
+          <div class="onb-logo">₲</div>
+          <h3>Ordenemos tu plata en dos minutos</h3>
+          <p>Esta app hace algo que las demás no: separa <b>dónde</b> está tu plata (efectivo, Mercado Pago, el banco) de <b>de quién</b> es (tuya o de cada negocio). Así sabés cuánto ganó cada cosa sin mezclar.</p>
+        </div>
+        <div class="modal-actions">
+          <button class="btn ghost" id="onbSkip">Lo configuro después</button>
+          <button class="btn" id="onbNext">Empecemos</button>
+        </div>`;
+      $('#onbSkip').onclick = cerrar;
+      $('#onbNext').onclick = () => { onbPaso = 2; pintar(); };
+      return;
+    }
+    if (onbPaso === 2) {
+      body.innerHTML = `
+        <p class="hint" style="margin-top:0">¿Dónde tenés plata hoy? Elegí las que uses — después podés agregar más.</p>
+        <div class="onb-picks">
+          ${BILLETERAS_SUGERIDAS.map(w => `
+            <button class="onb-pick ${onbElegidas.includes(w.name) ? 'on' : ''}" data-pick="${esc(w.name)}">
+              <span class="e">${w.emoji}</span><span>${esc(w.name)}</span>
+            </button>`).join('')}
+        </div>
+        <div class="field" style="margin-top:16px"><label>¿Cuánto tenés en total, más o menos? (opcional)</label>
+          <input id="onbSaldo" type="number" step="any" inputmode="decimal" placeholder="Dejalo vacío si preferís arrancar en cero">
+          <div class="hint">Se carga como saldo inicial en la primera billetera que elijas. Podés ajustarlo cuando quieras.</div></div>
+        <div class="modal-actions">
+          <button class="btn ghost" id="onbBack">Atrás</button>
+          <button class="btn" id="onbNext">Seguir</button>
+        </div>`;
+      document.querySelectorAll('[data-pick]').forEach(b => b.onclick = () => {
+        const n = b.dataset.pick;
+        onbElegidas = onbElegidas.includes(n) ? onbElegidas.filter(x => x !== n) : [...onbElegidas, n];
+        b.classList.toggle('on', onbElegidas.includes(n));
+      });
+      $('#onbBack').onclick = () => { onbPaso = 1; pintar(); };
+      $('#onbNext').onclick = () => {
+        if (!onbElegidas.length) return toast('Elegí al menos una');
+        onbSaldoInicial = parseFloat($('#onbSaldo').value) || 0;
+        onbPaso = 3; pintar();
+      };
+      return;
+    }
+    // Paso 3 · negocios
+    body.innerHTML = `
+      <p class="hint" style="margin-top:0">¿Manejás algún negocio además de tus gastos personales? Escribilos separados por coma. Si no, seguí de largo.</p>
+      <div class="field"><label>Negocios (opcional)</label>
+        <input id="onbNeg" type="text" placeholder="Ej: Lavadero, Tapizados" value="${esc(onbNegocios.join(', '))}"></div>
+      <div class="hint">Cada uno lleva su propia cuenta: vas a ver cuánto ganó cada negocio por separado, sin mezclarlo con lo tuyo.</div>
+      <div class="modal-actions">
+        <button class="btn ghost" id="onbBack">Atrás</button>
+        <button class="btn" id="onbDone">Listo, arrancar</button>
+      </div>`;
+    $('#onbBack').onclick = () => { onbPaso = 2; pintar(); };
+    $('#onbDone').onclick = () => {
+      onbNegocios = $('#onbNeg').value.split(',').map(s => s.trim()).filter(Boolean);
+      aplicarOnboarding();
+      cerrar();
+      toast('¡Listo! Cargá tu primer movimiento con ＋');
+    };
+  }
+
+  localStorage.setItem(ONBOARD_KEY, '1'); // aunque lo cierre a mitad de camino, no insiste
+  openModal({ title: '', body: '<div id="modalBody"></div>', onOpen: pintar });
+}
+let onbSaldoInicial = 0;
+// Reemplaza lo sembrado por lo que la persona eligió. Se hace de una sola vez y sobre un
+// estado sin movimientos, así que no hay nada que preservar.
+function aplicarOnboarding() {
+  const personal = state.units.find(u => u.kind === 'personal') || { id: uid(), name: 'Personal', kind: 'personal' };
+  state.units = [personal, ...onbNegocios.map(n => ({ id: uid(), name: n, kind: 'business' }))];
+  state.wallets = onbElegidas.map((n, i) => {
+    const base = BILLETERAS_SUGERIDAS.find(w => w.name === n) || { name: n, emoji: '👛' };
+    return {
+      id: uid(), name: base.name, emoji: base.emoji,
+      opening: i === 0 ? onbSaldoInicial : 0,
+      openingUnit: personal.id, currency: base.currency || 'ARS',
+    };
+  });
+  localStorage.setItem(ONBOARD_KEY, '1');
+  save();
+}
+
 // ---------- Deshacer ----------
 // En vez de preguntar "¿estás seguro?" antes de cada borrado —fricción en todas las acciones,
 // incluso las que no importan, y una advertencia que igual se contesta que sí sin leer— se
@@ -3223,11 +3381,12 @@ function saveSimple(type) {
     const m = state.movements.find(x => x.id === mEditId);
     m.type = type; m.amount = amount; m.date = $('#date').value; m.categoryId = $('#cat').value; m.note = note; m.attachment = mAttach || null;
     m.postings = [{ walletId: $('#wallet').value, unitId: $('#unit').value, amount: type === 'income' ? amount : -amount }];
-    mEditId = null; save(); closeModal(); render(); return toast('Movimiento actualizado');
+    mEditId = null; save(); guardarComprobanteAparte(m.id, mAttach); closeModal(); render(); return toast('Movimiento actualizado');
   }
   const m = { id: uid(), type, amount, date: $('#date').value, categoryId: $('#cat').value, note, source: 'manual', attachment: mAttach || null,
     postings: [{ walletId: $('#wallet').value, unitId: $('#unit').value, amount: type === 'income' ? amount : -amount }] };
   state.movements.push(m);
+  guardarComprobanteAparte(m.id, mAttach);
   let msg = type === 'income' ? 'Ingreso registrado' : 'Gasto registrado';
   if (type === 'expense') {
     // Redondeo hacia la meta de ahorro (solo billeteras en pesos)
@@ -3266,7 +3425,8 @@ function saveTransfer() {
   }
   const m = { id: uid(), type: 'transfer', amount, date: $('#date').value, categoryId: null, note: $('#note').value.trim(), source: 'manual', attachment: mAttach || null,
     postings: [{ walletId: fw, unitId: fu, amount: -amount }, { walletId: tw, unitId: tu, amount: toAmount }] };
-  state.movements.push(m); save(); closeModal(); render(); toast('Transferencia registrada');
+  state.movements.push(m);
+  guardarComprobanteAparte(m.id, mAttach); save(); closeModal(); render(); toast('Transferencia registrada');
 }
 function saveAdjust() {
   const walletId = $('#wallet').value, unitId = $('#unit').value, target = parseFloat($('#target').value);
@@ -3760,7 +3920,11 @@ applyTheme(localStorage.getItem('gf-theme') || (matchMedia('(prefers-color-schem
 render(); // pinta rápido con lo local; puebla #lensSel antes de medir el nav
 layoutNav();
 // Luego: baja de la nube si hay algo más nuevo, recién ahí corre los recurrentes automáticos.
-cloudInit().catch(() => {}).finally(() => { processRecurring(); render(); fetchRates(); });
+cloudInit().catch(() => {}).finally(() => {
+  processRecurring(); render(); fetchRates();
+  // Después de la nube: si bajó datos de otro dispositivo, esto ya no es una primera vez.
+  if (necesitaOnboarding()) setTimeout(onboardingModal, 400);
+});
 // La nube cambió de proyecto: hay que volver a conectar (los datos locales están intactos).
 if (supaMudanza) setTimeout(() => toast('☁ La nube se mudó de servidor: reconectá en Config → Nube'), 800);
 if (localStorage.getItem('gf-pin')) showLock();
